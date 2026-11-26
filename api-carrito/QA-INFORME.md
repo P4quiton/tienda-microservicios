@@ -56,3 +56,73 @@ docker stop mojarra-pg-carrito
 
 ## Nota de reverificación
 Las pruebas con base de datos exigen aplicar antes `node src/migrate.js` sobre la BD de prueba. Sin migrar, 9 de las 30 fallan (comprobado en una BD vacía); con la migración aplicada pasan las 30.
+
+## Contrato 1.1.0
+
+Entorno: PostgreSQL 17 temporal `mojarra-pg-carrito2` (puerto 55444, tmpfs, detenido al final), `node src/migrate.js` aplicado dos veces antes de cada corrida, con el rol `usr_carrito` (sin CREATEDB, dueño de su BD) y con superusuario. No se tocó `docs/api` ni otros servicios.
+
+### Cambios
+
+- `migrations/002-contrato-1-1.sql` (nueva, idempotente; la 001 no se editó): `carrito_items.linea_id uuid` único (las filas existentes reciben su propio UUID) y tabla `carrito_operaciones` (identidad, Idempotency-Key, operación, hash, resultado). `src/migrate.js` aplica todas las migraciones en orden.
+- `GET` y `agregar`: `version` (inicial 0) y `linea_id` por artículo. `agregar` conserva `linea_id` mientras exista la línea.
+- Nuevos `iniciar`, `finalizar`, `liberar` y `vaciar` (ahora vacía de verdad; antes devolvía 409 con artículos), todos con `Idempotency-Key` y solo `X-Service-Token`.
+- Eliminado el protocolo experimental: rutas `/checkout/*`, bandera `ENABLE_DRAFT_CART_CHECKOUT` y `test/draft-checkout.test.js`. Se conserva lo probado: un snapshot activo por carrito, snapshot original en repeticiones, confirmación idempotente y preservación de adiciones posteriores. Cambia: el segundo checkout activo ahora es 409 (antes 503), por contrato.
+- Bloqueos en orden fijo (clave de idempotencia, pedido, fila del carrito) para evitar interbloqueos.
+
+### Resultado antes / después
+
+| Momento | Resultado |
+|---|---|
+| Línea base (superusuario) | 30 pruebas, 30 OK. Con `usr_carrito`: 27 OK y 3 omitidas (requieren CREATEDB) |
+| Pruebas nuevas `test/contrato-1-1.test.js`, antes del código | 18 pruebas, **18 fallan** |
+| Tras implementar (superusuario, 3 corridas) | **46 pruebas, 46 OK**, 0 omitidas |
+| Con `usr_carrito` | 43 contadas, 42 OK, 0 fallos, 1 omitida (migración sobre BD temporal: requiere CREATEDB) |
+| Sin BD (`env -u TEST_DATABASE_URL npm test`) | 23 pruebas, 21 OK, 0 fallos, 2 omitidas |
+
+Las 30 previas siguen cubiertas salvo las 2 del protocolo experimental, sustituidas por pruebas del contrato 1.1.0. Se adaptaron al contrato las pruebas de `vaciar` (app y QA hostil, ahora con Idempotency-Key y `clear`) y las de `store.test.js` (nueva API `start/finish/release`) sin debilitar aserciones.
+
+Cubierto con PostgreSQL real: aceptación (2 en compra + 1 durante el pago: aprobado queda 1, cancelado 3, repetir finalizar sigue en 1), versión/linea_id, `linea_id` nuevo tras retirar una línea, pedido ajeno a otro carrito, liberar sin snapshot, vaciar con checkout activo, idempotencia por clave (misma clave y otra solicitud: 409), concurrencia (12 agregar + 4 finalizar en paralelo, 5 rondas: sin pérdidas ni duplicados; 6 iniciar simultáneos del mismo pedido; mismo pedido desde dos usuarios sin 5xx) y migración 002 sobre datos existentes, repetida y en paralelo.
+
+### JSON para Pedidos
+
+Todas las llamadas: cabeceras `X-Service-Token: <token Pedidos->Carrito>`, `Idempotency-Key: <uuid estable por operación>`, `Content-Type: application/json`. Las respuestas exitosas son `{"success":true,"message":"OK","data":...}`; los errores `{"success":false,"message":"...","errors":{}}`. `version` y `version_original` son enteros JSON (no cadenas). Orden de validación: 401 (credencial), 422 (usuario, clave, cuerpo), 409 (estado). Una misma clave con otra solicitud devuelve 409.
+
+`GET /api/carrito/{usuario_id}` (y `data` de `agregar`, `finalizar`, `liberar`, `vaciar`):
+
+```json
+{"success":true,"message":"OK","data":{"usuario_id":"U","items":[{"producto_id":"P","cantidad":2,"linea_id":"L"}],"version":1}}
+```
+
+`POST /api/carrito/{usuario_id}/iniciar`, solicitud y `data`:
+
+```json
+{"pedido_id":"O","version_original":1}
+{"pedido_id":"O","version_original":1,"items":[{"producto_id":"P","cantidad":2,"linea_id":"L"}]}
+```
+
+`POST /api/carrito/{usuario_id}/finalizar`, solicitud (items exactos del snapshot, incluido `linea_id`) y `data` (carrito resultante; la versión puede superar `version_original`; con 2 comprados y 1 añadida durante el pago):
+
+```json
+{"pedido_id":"O","version_original":1,"items":[{"producto_id":"P","cantidad":2,"linea_id":"L"}]}
+{"usuario_id":"U","items":[{"producto_id":"P","cantidad":1,"linea_id":"L"}],"version":3}
+```
+
+`POST /api/carrito/{usuario_id}/liberar`, solicitud y `data` (carrito sin cambios):
+
+```json
+{"pedido_id":"O"}
+{"usuario_id":"U","items":[{"producto_id":"P","cantidad":3,"linea_id":"L"}],"version":2}
+```
+
+`DELETE /api/carrito/{usuario_id}/vaciar` (sin cuerpo; solo fuera de checkout) devuelve `data` `{"usuario_id":"U","items":[],"version":N}`.
+
+Códigos: 200; 401 token interno ausente o inválido (un JWT no sirve); 422 UUID, clave o cuerpo inválidos (campos extra, `items` vacío o con `linea_id` repetido); 409 versión distinta, carrito vacío, otro checkout activo, pedido de otro carrito, snapshot inexistente o incompatible, checkout liberado o ya finalizado, clave reutilizada; 503 BD no disponible.
+
+Decisiones a confirmar con Pedidos: `finalizar` sin snapshot previo responde 409 (el YAML no distingue 404); `iniciar` repetido de un pedido ya finalizado devuelve el snapshot original (solo lectura), de uno liberado 409; el cierre sin snapshot de `liberar` se guarda como un checkout cancelado vacío.
+
+### Pendientes / NO VERIFICADO
+
+- **NO VERIFICADO**: `docker build`, integración real con Pedidos y el proxy (que debe bloquear las rutas internas).
+- Snapshots pendientes creados con el protocolo experimental antes de la 002 no traen `linea_id`: su `finalizar` daría 409 y deberían liberarse. Resultados de `agregar` guardados antes de 1.1.0 se repiten con el estado actual del carrito.
+- `carrito_operaciones` y `carrito_adiciones` crecen sin expiración.
+- La suite no valida las respuestas contra el YAML con un validador OpenAPI; se comprobó a mano la forma de `data`.

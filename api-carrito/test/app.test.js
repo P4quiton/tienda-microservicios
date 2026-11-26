@@ -10,7 +10,7 @@ const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 20
 const userId = randomUUID();
 const productId = randomUUID();
 const key = randomUUID();
-const cart = { usuario_id: userId, items: [{ producto_id: productId, cantidad: 2 }] };
+const cart = { usuario_id: userId, items: [{ producto_id: productId, cantidad: 2, linea_id: randomUUID() }], version: 1 };
 const calls = [];
 let ready = true;
 let items = cart.items;
@@ -33,13 +33,17 @@ before(async () => {
     publicKey,
     serviceToken: 'token-solo-pruebas',
     store: {
-      list: async (id) => ({ usuario_id: id, items }),
+      list: async (id) => ({ usuario_id: id, items, version: cart.version }),
       ready: async () => {
         if (!ready) throw new Error('No disponible');
       },
       add: async (input) => {
         calls.push(input);
         return cart;
+      },
+      clear: async ({ userId: id }) => {
+        items = [];
+        return { usuario_id: id, items, version: 2 };
       },
     },
   });
@@ -100,15 +104,15 @@ test('agregar valida cuerpo, identidad y clave antes de cambiar el carrito', asy
   );
 });
 
-test('vaciar exige identidad interna y preserva el carrito sin referencia a una compra', async () => {
+test('vaciar exige identidad interna e Idempotency-Key y devuelve el carrito vacío con su versión', async () => {
   const url = base + '/api/carrito/' + userId + '/vaciar';
   assert.equal((await fetch(url, {
     method: 'DELETE', headers: { Authorization: 'Bearer ' + await token() },
   })).status, 401);
-  const options = { method: 'DELETE', headers: { 'X-Service-Token': 'token-solo-pruebas' } };
-  assert.equal((await fetch(url, options)).status, 409);
-  items = [];
-  assert.equal((await fetch(url, options)).status, 200);
+  const options = { method: 'DELETE', headers: { 'X-Service-Token': 'token-solo-pruebas', 'Idempotency-Key': key } };
+  const emptied = await fetch(url, options);
+  assert.equal(emptied.status, 200);
+  assert.deepEqual((await emptied.json()).data, { usuario_id: userId, items: [], version: 2 });
 });
 
 test('consulta de catálogo utiliza los contratos y diferencia faltantes de fallos', async () => {

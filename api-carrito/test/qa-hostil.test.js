@@ -170,7 +170,10 @@ describe('JWT y credenciales internas (sin BD)', () => {
   const user = randomUUID();
   let base;
   before(async () => {
-    base = await listen({ store: { list: async (id) => ({ usuario_id: id, items: [] }), ready: async () => {} } });
+    base = await listen({ store: {
+      list: async (id) => ({ usuario_id: id, items: [], version: 0 }), ready: async () => {},
+      clear: async ({ userId }) => ({ usuario_id: userId, items: [], version: 0 }),
+    } });
   });
   const get = (headers) => fetch(`${base}/api/carrito/${user}`, { headers });
   const bearer = (t) => get({ Authorization: 'Bearer ' + t });
@@ -224,7 +227,7 @@ describe('JWT y credenciales internas (sin BD)', () => {
     for (const value of attempts) assert.equal((await get({ 'X-Service-Token': value })).status, 401, JSON.stringify(value));
     assert.equal((await get({ Authorization: 'Bearer ' + SERVICE })).status, 401);
     assert.equal((await get({ 'X-Service-Token': SERVICE })).status, 200);
-    const del = (headers) => fetch(`${base}/api/carrito/${user}/vaciar`, { method: 'DELETE', headers });
+    const del = (headers) => fetch(`${base}/api/carrito/${user}/vaciar`, { method: 'DELETE', headers: { 'Idempotency-Key': randomUUID(), ...headers } });
     assert.equal((await del({})).status, 401);
     assert.equal((await del({ Authorization: 'Bearer ' + await jwt({ sub: user, role: 'admin' }) })).status, 401);
     assert.equal((await del({ 'X-Service-Token': 'otro' })).status, 401);

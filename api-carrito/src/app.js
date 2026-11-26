@@ -28,30 +28,41 @@ function success(res, data) {
   res.json({ success: true, message: 'OK', data });
 }
 
-function checkoutPayload(body) {
-  if (!body || typeof body !== 'object' || Array.isArray(body) ||
-      Object.keys(body).sort().join(',') !== 'items,pedido_id,version' ||
-      typeof body.version !== 'string' || !/^(0|[1-9][0-9]*)$/.test(body.version) ||
-      !Array.isArray(body.items) || !body.items.length) {
-    throw new ApiError(422, 'Se requieren pedido_id, version e items válidos', 'body');
+function exactObject(value, names, field) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== names.join(',')) {
+    throw new ApiError(422, 'Cuerpo inválido para ' + field, field);
   }
-  const orderId = readUUID(body.pedido_id, 'pedido_id');
-  const items = body.items.map((item) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item) ||
-        Object.keys(item).sort().join(',') !== 'cantidad,producto_id' ||
-        !Number.isInteger(item.cantidad) || item.cantidad < 1 || item.cantidad > 2147483647) {
-      throw new ApiError(422, 'Artículo inválido', 'items');
-    }
-    return { producto_id: readUUID(item.producto_id, 'producto_id'), cantidad: item.cantidad };
-  });
-  items.sort((a, b) => a.producto_id.localeCompare(b.producto_id));
-  if (items.some((item, i) => i && item.producto_id === items[i - 1].producto_id)) {
-    throw new ApiError(422, 'Productos duplicados', 'items');
-  }
-  return { orderId, expected: { version: body.version, items } };
+  return value;
 }
 
-export function createApp({ store, available, publicKey, serviceToken, enableDraftCartCheckout = false }) {
+function readVersion(value) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new ApiError(422, 'Se requiere un entero no negativo', 'version_original');
+  }
+  return value;
+}
+
+// Líneas del snapshot: exactamente producto_id, cantidad y linea_id; sin repetir linea_id.
+function readLines(items) {
+  if (!Array.isArray(items) || !items.length) throw new ApiError(422, 'Se requiere al menos un artículo', 'items');
+  const lines = items.map((item) => {
+    exactObject(item, ['cantidad', 'linea_id', 'producto_id'], 'items');
+    if (!Number.isInteger(item.cantidad) || item.cantidad < 1 || item.cantidad > 2147483647) {
+      throw new ApiError(422, 'Artículo inválido', 'items');
+    }
+    return {
+      producto_id: readUUID(item.producto_id, 'producto_id'),
+      cantidad: item.cantidad,
+      linea_id: readUUID(item.linea_id, 'linea_id'),
+    };
+  });
+  if (new Set(lines.map((line) => line.linea_id)).size !== lines.length) {
+    throw new ApiError(422, 'Líneas duplicadas', 'items');
+  }
+  return lines;
+}
+
+export function createApp({ store, available, publicKey, serviceToken }) {
   const app = express();
   const auth = authentication({ publicKey, serviceToken });
 
@@ -73,24 +84,6 @@ export function createApp({ store, available, publicKey, serviceToken, enableDra
     res.set('Cache-Control', 'no-store');
     next();
   });
-
-  if (enableDraftCartCheckout) {
-    app.get('/api/carrito/:userId/checkout', async (req, res) => {
-      auth.service(req);
-      const userId = readUUID(req.params.userId, 'usuario_id');
-      success(res, await store.checkout(userId));
-    });
-    for (const [action, method] of [
-      ['preparar', 'prepareCheckout'], ['confirmar', 'finishCheckout'], ['cancelar', 'cancelCheckout'],
-    ]) {
-      app.post('/api/carrito/:userId/checkout/' + action, async (req, res) => {
-        auth.service(req);
-        const userId = readUUID(req.params.userId, 'usuario_id');
-        const { orderId, expected } = checkoutPayload(req.body);
-        success(res, await store[method](userId, orderId, expected));
-      });
-    }
-  }
 
   app.get('/api/carrito/:userId', async (req, res) => {
     // Primero la identidad (401/403) y después la validación del parámetro (422).
@@ -118,15 +111,33 @@ export function createApp({ store, available, publicKey, serviceToken, enableDra
     }));
   });
 
-  app.delete('/api/carrito/:userId/vaciar', async (req, res) => {
-    auth.service(req);
-    const userId = readUUID(req.params.userId, 'usuario_id');
-    const cart = await store.list(userId);
-    if (cart.items.length) {
-      throw new ApiError(409, 'Se requiere identificar la versión del carrito comprada');
-    }
-    success(res, cart);
-  });
+  // Operaciones internas de Pedidos: identidad (401), usuario (422), Idempotency-Key (422) y cuerpo (422), en ese orden.
+  function internal(method, action, parseBody, run) {
+    app[method]('/api/carrito/:userId/' + action, async (req, res) => {
+      auth.service(req);
+      const userId = readUUID(req.params.userId, 'usuario_id');
+      const key = readUUID(req.get('Idempotency-Key'), 'Idempotency-Key');
+      success(res, await run({ userId, key, ...parseBody(req.body) }));
+    });
+  }
+
+  internal('delete', 'vaciar', () => ({}), (input) => store.clear(input));
+  internal('post', 'iniciar', (body) => {
+    exactObject(body, ['pedido_id', 'version_original'], 'body');
+    return { orderId: readUUID(body.pedido_id, 'pedido_id'), originalVersion: readVersion(body.version_original) };
+  }, (input) => store.start(input));
+  internal('post', 'finalizar', (body) => {
+    exactObject(body, ['items', 'pedido_id', 'version_original'], 'body');
+    return {
+      orderId: readUUID(body.pedido_id, 'pedido_id'),
+      originalVersion: readVersion(body.version_original),
+      items: readLines(body.items),
+    };
+  }, (input) => store.finish(input));
+  internal('post', 'liberar', (body) => {
+    exactObject(body, ['pedido_id'], 'body');
+    return { orderId: readUUID(body.pedido_id, 'pedido_id') };
+  }, (input) => store.release(input));
 
   app.use((_req, _res, next) => next(new ApiError(404, 'Ruta inexistente')));
 

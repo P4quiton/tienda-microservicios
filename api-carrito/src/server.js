@@ -26,7 +26,6 @@ try {
   });
   const app = createApp({
     store: cartStore(pool), available, publicKey, serviceToken: env.SERVICE_TOKEN_PEDIDOS_CARRITO,
-    enableDraftCartCheckout: env.ENABLE_DRAFT_CART_CHECKOUT === 'true',
   });
   const port = Number(env.PORT ?? 8005);
   const server = app.listen(port, '0.0.0.0', () => console.log(`api-carrito escucha en ${port}`));
