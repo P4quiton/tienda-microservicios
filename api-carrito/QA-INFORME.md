@@ -50,8 +50,8 @@ docker stop mojarra-pg-carrito
 - Diseño (Media): `available()` (2 llamadas HTTP, 1 s cada una) se ejecuta dentro de la transacción con el candado del carrito; un Productos/Inventario lento retiene conexiones (pool de 10) y degrada a 503. Sacar la consulta de la transacción rompería la garantía de tope bajo carrera; requiere decisión del equipo.
 - `DELETE /vaciar` responde 409 si el carrito tiene artículos (comportamiento documentado en README, pendiente de acordar con Pedidos).
 - `carrito_adiciones` crece sin límite (sin expiración de claves de idempotencia).
-- No hay rate limiting ni longitud mínima exigida para `SERVICE_TOKEN_PEDIDOS_CARRITO` (solo se rechaza vacío/`REPLACE_ME`).
-- Un cuerpo > 16 kB devuelve 400 (el contrato no define 413).
+- Rate limiting: resuelto, ver 'Decisiones del equipo (rate limiting)'. Sigue sin exigirse longitud mínima a `SERVICE_TOKEN_PEDIDOS_CARRITO` (solo se rechaza vacío/`REPLACE_ME`).
+- Tamaño de cuerpo: el límite de 16 kB/400 se sustituyó por 256 KiB/413 (ver sección de decisiones del equipo).
 - Importes MXN: este servicio no recibe importes; el rechazo de campos extra (`precio`) está probado, pero la validación de decimales MXN no aplica aquí.
 
 ## Nota de reverificación
@@ -126,3 +126,41 @@ Decisiones a confirmar con Pedidos: `finalizar` sin snapshot previo responde 409
 - Snapshots pendientes creados con el protocolo experimental antes de la 002 no traen `linea_id`: su `finalizar` daría 409 y deberían liberarse. Resultados de `agregar` guardados antes de 1.1.0 se repiten con el estado actual del carrito.
 - `carrito_operaciones` y `carrito_adiciones` crecen sin expiración.
 - La suite no valida las respuestas contra el YAML con un validador OpenAPI; se comprobó a mano la forma de `data`.
+
+## Decisiones del equipo (rate limiting)
+
+Decisión del integrante 1: límites configurables por entorno, en memoria por proceso. Implementación en `src/limits.js` (config, contador de ventana fija de 60 s) y `src/app.js` (aplicación tras autenticar).
+
+| Variable | Defecto | Alcance |
+|---|---|---|
+| `RATE_LIMIT_CONSULTA_POR_MIN` | 120 | GET con JWT, por `sub` |
+| `RATE_LIMIT_MUTACION_POR_MIN` | 30 | `agregar` con JWT, por `sub` |
+| `RATE_LIMIT_INTERNA_POR_MIN` | 300 | identidad de servicio (X-Service-Token válido): iniciar/finalizar/liberar/vaciar y GET interno, un solo cupo |
+| `MAX_JSON_BYTES` | 262144 | cuerpo JSON; exceso => 413 |
+| `RATE_LIMIT_CHECKOUT_POR_MIN` | n/a | no aplica a Carrito; se ignora |
+
+Comportamiento: exceso => 429 con `Retry-After` (segundos restantes de la ventana) y `{success:false,message,errors:{}}`. Se autentica primero: sin credencial/credencial inválida sigue 401 (y 403 sin permiso); esos fallos cuentan contra la IP (cupo de consultas), así que una IP que insiste sin autenticarse acaba en 429. `/health` y `/ready` exentos. Valores de entorno inválidos (no entero positivo) abortan el arranque.
+
+Cambios en pruebas existentes (justificados):
+- `qa-hostil` 'cuerpos enormes...': esperaba 400 para 20 kB; con 256 KiB ese cuerpo llega a validación (422), y se añadieron 300 kB => 413 y 5 MB => 413 (antes solo "4xx").
+- Todas las suites importan `test/env-limites-altos.js` (límites de 1.000.000/min) para no chocar con los cupos; `test/limites.test.js` (15 pruebas nuevas) usa límites bajos propios.
+
+### Resultado antes / después
+
+| Momento | Comando | Resultado |
+|---|---|---|
+| Línea base (BD PG17 `mojarra-pg-carrito3`, puerto 55454, rol NOSUPERUSER/NOCREATEDB) | `TEST_DATABASE_URL=... npm test` (5 suites previas) | 45 pruebas: 44 OK, 0 fallos, 1 omitida (migración 002 en BD temporal: el rol no tiene CREATEDB) |
+| Rojo | `node --test test/limites.test.js` antes de código | falla al importar `src/limits.js` (inexistente); no se ejecutó ninguna prueba |
+| Final con BD | `npm test` (3 ejecuciones consecutivas) | 60 pruebas: 59 OK, 0 fallos, 1 omitida (la misma) |
+| Final sin BD | `npm test` sin `TEST_DATABASE_URL` | 40 pruebas: 38 OK, 0 fallos, 2 omitidas |
+
+### Pendientes / NO VERIFICADO
+
+- Con varias réplicas el límite es por instancia (no hay almacén compartido); el límite efectivo es N x valor.
+- Sin `trust proxy`, `req.ip` detrás de proxy/Ingress es la IP del proxy: el límite por IP de peticiones sin autenticar sería compartido por todos los clientes. Decidir con el equipo la configuración de proxies de confianza; no se tocó.
+- Un cuerpo > máximo recibe 413 antes de autenticar (lo aplica el analizador de JSON, previo a la autenticación); el 429 sí va después de autenticar.
+- El contrato (`docs/api/carrito.yaml`) declara 429 pero no 413 ni `Retry-After`; no se modificó `docs/api`.
+- Ventana fija: permite ráfagas de hasta 2x el límite en el cambio de ventana.
+- El contador no se probó bajo carga real ni con proxy; `docker build` y Compose NO VERIFICADOS.
+- Idempotencia: sin expiración ni borrado de `carrito_operaciones`/`carrito_adiciones`; decisión de MVP, no implementado.
+- Se ejecutó `npm ci` (crea `node_modules/` en el servicio; no hay `.gitignore` local).
