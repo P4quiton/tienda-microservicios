@@ -1,0 +1,417 @@
+openapi: 3.0.3
+info:
+  title: API usuarios
+  version: 1.0.0
+  description: PHP / Laravel / PostgreSQL | Contrato inicial propuesto y aprobado a nivel de arquitectura.
+servers:
+- url: http://localhost:8001
+  description: Desarrollo individual
+- url: http://localhost:4200
+  description: Proxy frontend (solo rutas públicas o de usuario)
+- url: http://api-usuarios:8001
+  description: Red interna
+paths:
+  /api/usuarios/registro:
+    post:
+      summary: Registrar cliente
+      description: Público. Correo único normalizado; rol siempre cliente; nunca retornar hash.
+      operationId: usuarios_1
+      security: []
+      responses:
+        '201':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data: &id001
+                    type: object
+                    properties:
+                      id: &id002
+                        type: string
+                        format: uuid
+                      nombre:
+                        type: string
+                      correo:
+                        type: string
+                        format: email
+                      role:
+                        type: string
+                        enum:
+                        - cliente
+                        - admin
+                    required:
+                    - id
+                    - nombre
+                    - correo
+                    - role
+                    additionalProperties: false
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre:
+                  type: string
+                  minLength: 1
+                  maxLength: 120
+                correo:
+                  type: string
+                  format: email
+                contrasena:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+              required:
+              - nombre
+              - correo
+              - contrasena
+              additionalProperties: false
+  /api/usuarios/login:
+    post:
+      summary: Iniciar sesión
+      description: 'Público. Credenciales inválidas: 401 genérico; limitar intentos.'
+      operationId: usuarios_2
+      security: []
+      responses:
+        '200':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      access_token:
+                        type: string
+                      token_type:
+                        type: string
+                        enum:
+                        - Bearer
+                      expires_in:
+                        type: integer
+                        example: 3600
+                      usuario: *id001
+                    required:
+                    - access_token
+                    - token_type
+                    - expires_in
+                    - usuario
+                    additionalProperties: false
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                correo:
+                  type: string
+                  format: email
+                contrasena:
+                  type: string
+              required:
+              - correo
+              - contrasena
+              additionalProperties: false
+  /api/usuarios/{id}:
+    get:
+      summary: Consultar perfil
+      description: JWT del titular o admin. Solo titular o admin.
+      operationId: usuarios_3
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data: *id001
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id002
+  /health:
+    get:
+      summary: Proceso activo
+      security: []
+      responses:
+        '200':
+          description: Estado operativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ok
+                    - unavailable
+                  service:
+                    type: string
+                    example: api-usuarios
+                required:
+                - status
+                - service
+                additionalProperties: false
+  /ready:
+    get:
+      summary: Listo para recibir tráfico
+      security: []
+      responses:
+        '200': &id003
+          description: Estado operativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ok
+                    - unavailable
+                  service:
+                    type: string
+                    example: api-usuarios
+                required:
+                - status
+                - service
+                additionalProperties: false
+        '503': *id003
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    serviceAuth:
+      type: apiKey
+      in: header
+      name: X-Service-Token
+  schemas:
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - false
+        message:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+      required:
+      - success
+      - message
+      - errors
+      additionalProperties: false

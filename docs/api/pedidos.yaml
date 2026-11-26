@@ -1,0 +1,542 @@
+openapi: 3.0.3
+info:
+  title: API pedidos
+  version: 1.0.0
+  description: PHP / Laravel / PostgreSQL | Contrato inicial propuesto y aprobado a nivel de arquitectura.
+servers:
+- url: http://localhost:8006
+  description: Desarrollo individual
+- url: http://localhost:4200
+  description: Proxy frontend (solo rutas públicas o de usuario)
+- url: http://api-pedidos:8006
+  description: Red interna
+paths:
+  /api/pedidos:
+    post:
+      summary: Crear pedido y coordinar compra
+      description: JWT cliente o admin. Usuario desde sub; leer carrito, recalcular importes, reservar, pagar y
+        finalizar. 201 para pedido persistido incluso si pago rechazado; estado cancelado. 503 si resultado incierto;
+        reintentar misma clave.
+      operationId: pedidos_18
+      security:
+      - bearerAuth: []
+      responses:
+        '201':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data: &id004
+                    type: object
+                    properties:
+                      id: &id001
+                        type: string
+                        format: uuid
+                      usuario_id: *id001
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            producto_id: *id001
+                            cantidad:
+                              type: integer
+                              minimum: 1
+                            precio_unitario: &id002
+                              type: string
+                              pattern: ^\d{1,10}\.\d{2}$
+                              example: '899.99'
+                          required:
+                          - producto_id
+                          - cantidad
+                          - precio_unitario
+                          additionalProperties: false
+                      direccion: &id003
+                        type: object
+                        properties:
+                          codigo_postal:
+                            type: string
+                            pattern: ^[0-9]{5}$
+                          calle:
+                            type: string
+                          ciudad:
+                            type: string
+                          estado:
+                            type: string
+                        required:
+                        - codigo_postal
+                        - calle
+                        - ciudad
+                        - estado
+                        additionalProperties: false
+                      costo_envio: *id002
+                      total: *id002
+                      estado:
+                        type: string
+                        enum:
+                        - pendiente
+                        - pagado
+                        - enviado
+                        - cancelado
+                      creado_en:
+                        type: string
+                        format: date-time
+                    required:
+                    - id
+                    - usuario_id
+                    - items
+                    - direccion
+                    - costo_envio
+                    - total
+                    - estado
+                    - creado_en
+                    additionalProperties: false
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema: *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                direccion: *id003
+                metodo_pago:
+                  type: string
+                  enum:
+                  - tarjeta_simulada
+                  - transferencia_simulada
+              required:
+              - direccion
+              - metodo_pago
+              additionalProperties: false
+  /api/pedidos/usuario/{usuario_id}:
+    get:
+      summary: Historial de pedidos
+      description: 'JWT del titular o admin. '
+      operationId: pedidos_19
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data:
+                    type: array
+                    items: *id004
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: usuario_id
+        in: path
+        required: true
+        schema: *id001
+  /api/pedidos/{id}/estado:
+    patch:
+      summary: Actualizar estado
+      description: Identidad interna autorizada. Solo identidad interna autorizada; validar transición y pago; no
+        permitir cancelación de pago aprobado.
+      operationId: pedidos_20
+      security:
+      - serviceAuth: []
+      responses:
+        '200':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data: *id004
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                estado:
+                  type: string
+                  enum:
+                  - pendiente
+                  - pagado
+                  - enviado
+                  - cancelado
+              required:
+              - estado
+              additionalProperties: false
+  /api/pedidos/{id}:
+    get:
+      summary: Consultar pedido
+      description: Titular/admin o identidad interna autorizada. Titular, admin o servicio autorizado; necesario
+        para verificar rastreo y comprobante.
+      operationId: pedidos_21
+      security:
+      - bearerAuth: []
+      - serviceAuth: []
+      responses:
+        '200':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data: *id004
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id001
+  /health:
+    get:
+      summary: Proceso activo
+      security: []
+      responses:
+        '200':
+          description: Estado operativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ok
+                    - unavailable
+                  service:
+                    type: string
+                    example: api-pedidos
+                required:
+                - status
+                - service
+                additionalProperties: false
+  /ready:
+    get:
+      summary: Listo para recibir tráfico
+      security: []
+      responses:
+        '200': &id005
+          description: Estado operativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ok
+                    - unavailable
+                  service:
+                    type: string
+                    example: api-pedidos
+                required:
+                - status
+                - service
+                additionalProperties: false
+        '503': *id005
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    serviceAuth:
+      type: apiKey
+      in: header
+      name: X-Service-Token
+  schemas:
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - false
+        message:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+      required:
+      - success
+      - message
+      - errors
+      additionalProperties: false

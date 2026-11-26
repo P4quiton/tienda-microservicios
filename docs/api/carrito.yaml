@@ -1,0 +1,385 @@
+openapi: 3.0.3
+info:
+  title: API carrito
+  version: 1.0.0
+  description: Node.js / Express / PostgreSQL | Contrato inicial propuesto y aprobado a nivel de arquitectura.
+servers:
+- url: http://localhost:8005
+  description: Desarrollo individual
+- url: http://localhost:4200
+  description: Proxy frontend (solo rutas públicas o de usuario)
+- url: http://api-carrito:8005
+  description: Red interna
+paths:
+  /api/carrito/{usuario_id}:
+    get:
+      summary: Consultar carrito
+      description: 'Titular/admin o identidad interna autorizada. Sin artículos: lista vacía.'
+      operationId: carrito_15
+      security:
+      - bearerAuth: []
+      - serviceAuth: []
+      responses:
+        '200':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data: &id002
+                    type: object
+                    properties:
+                      usuario_id: &id001
+                        type: string
+                        format: uuid
+                      items:
+                        type: array
+                        items: &id003
+                          type: object
+                          properties:
+                            producto_id: *id001
+                            cantidad:
+                              type: integer
+                              minimum: 1
+                          required:
+                          - producto_id
+                          - cantidad
+                          additionalProperties: false
+                    required:
+                    - usuario_id
+                    - items
+                    additionalProperties: false
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: usuario_id
+        in: path
+        required: true
+        schema: *id001
+  /api/carrito/{usuario_id}/agregar:
+    post:
+      summary: Agregar artículo
+      description: JWT del titular o admin. Incrementa cantidad; comprobar producto y disponibilidad orientativa;
+        no reserva stock.
+      operationId: carrito_16
+      security:
+      - bearerAuth: []
+      responses:
+        '200':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data: *id002
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: usuario_id
+        in: path
+        required: true
+        schema: *id001
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema: *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: *id003
+  /api/carrito/{usuario_id}/vaciar:
+    delete:
+      summary: Vaciar carrito
+      description: Identidad interna autorizada. Solo Pedidos tras pago; repetir no falla. Durante checkout bloquear
+        cambios del carrito o aplicar control de versión para no perder nuevas adiciones.
+      operationId: carrito_17
+      security:
+      - serviceAuth: []
+      responses:
+        '200':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data: *id002
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: usuario_id
+        in: path
+        required: true
+        schema: *id001
+  /health:
+    get:
+      summary: Proceso activo
+      security: []
+      responses:
+        '200':
+          description: Estado operativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ok
+                    - unavailable
+                  service:
+                    type: string
+                    example: api-carrito
+                required:
+                - status
+                - service
+                additionalProperties: false
+  /ready:
+    get:
+      summary: Listo para recibir tráfico
+      security: []
+      responses:
+        '200': &id004
+          description: Estado operativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ok
+                    - unavailable
+                  service:
+                    type: string
+                    example: api-carrito
+                required:
+                - status
+                - service
+                additionalProperties: false
+        '503': *id004
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    serviceAuth:
+      type: apiKey
+      in: header
+      name: X-Service-Token
+  schemas:
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - false
+        message:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+      required:
+      - success
+      - message
+      - errors
+      additionalProperties: false

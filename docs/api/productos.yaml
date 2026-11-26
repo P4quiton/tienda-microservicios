@@ -1,0 +1,436 @@
+openapi: 3.0.3
+info:
+  title: API productos
+  version: 1.0.0
+  description: PHP / Laravel / PostgreSQL | Contrato inicial propuesto y aprobado a nivel de arquitectura.
+servers:
+- url: http://localhost:8002
+  description: Desarrollo individual
+- url: http://localhost:4200
+  description: Proxy frontend (solo rutas públicas o de usuario)
+- url: http://api-productos:8002
+  description: Red interna
+paths:
+  /api/productos:
+    get:
+      summary: Listar catálogo
+      description: 'Público. '
+      operationId: productos_4
+      security: []
+      responses:
+        '200':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: &id001
+                          type: object
+                          properties:
+                            id: &id003
+                              type: string
+                              format: uuid
+                            nombre:
+                              type: string
+                            descripcion:
+                              type: string
+                            precio: &id002
+                              type: string
+                              pattern: ^\d{1,10}\.\d{2}$
+                              example: '899.99'
+                            categoria:
+                              type: string
+                            imagen_url:
+                              type: string
+                              format: uri
+                          required:
+                          - id
+                          - nombre
+                          - descripcion
+                          - precio
+                          - categoria
+                          - imagen_url
+                          additionalProperties: false
+                      total:
+                        type: integer
+                        minimum: 0
+                      pagina:
+                        type: integer
+                        minimum: 1
+                      limite:
+                        type: integer
+                        minimum: 1
+                    required:
+                    - items
+                    - total
+                    - pagina
+                    - limite
+                    additionalProperties: false
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: q
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: categoria
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: pagina
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - name: limite
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+    post:
+      summary: Crear producto
+      description: JWT admin. Precio estrictamente positivo; solo administrador.
+      operationId: productos_6
+      security:
+      - bearerAuth: []
+      responses:
+        '201':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data: *id001
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nombre:
+                  type: string
+                  minLength: 1
+                descripcion:
+                  type: string
+                precio: *id002
+                categoria:
+                  type: string
+                  minLength: 1
+                imagen_url:
+                  type: string
+                  format: uri
+              required:
+              - nombre
+              - descripcion
+              - precio
+              - categoria
+              - imagen_url
+              additionalProperties: false
+  /api/productos/{id}:
+    get:
+      summary: Consultar producto
+      description: 'Público. '
+      operationId: productos_5
+      security: []
+      responses:
+        '200':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data: *id001
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema: *id003
+  /health:
+    get:
+      summary: Proceso activo
+      security: []
+      responses:
+        '200':
+          description: Estado operativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ok
+                    - unavailable
+                  service:
+                    type: string
+                    example: api-productos
+                required:
+                - status
+                - service
+                additionalProperties: false
+  /ready:
+    get:
+      summary: Listo para recibir tráfico
+      security: []
+      responses:
+        '200': &id004
+          description: Estado operativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ok
+                    - unavailable
+                  service:
+                    type: string
+                    example: api-productos
+                required:
+                - status
+                - service
+                additionalProperties: false
+        '503': *id004
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    serviceAuth:
+      type: apiKey
+      in: header
+      name: X-Service-Token
+  schemas:
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - false
+        message:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+      required:
+      - success
+      - message
+      - errors
+      additionalProperties: false
