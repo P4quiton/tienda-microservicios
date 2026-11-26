@@ -17,6 +17,16 @@ const SERVICE = 'token-pedidos-qa';
 const connectionString = process.env.TEST_DATABASE_URL;
 const pool = connectionString ? new pg.Pool({ connectionString }) : null;
 const servers = [];
+// Las pruebas de migración crean BD temporales: se omiten si el rol no tiene CREATEDB ni es superusuario.
+let skipScratch = !pool && 'sin TEST_DATABASE_URL';
+if (pool) {
+  try {
+    const { rows } = await pool.query('SELECT rolcreatedb OR rolsuper AS ok FROM pg_roles WHERE rolname = current_user');
+    if (!rows[0]?.ok) skipScratch = 'el rol de prueba no puede crear bases de datos (requiere CREATEDB)';
+  } catch (error) {
+    skipScratch = `no se pudo comprobar CREATEDB: ${error.message}`;
+  }
+}
 
 async function listen(options) {
   const server = createApp({ publicKey, serviceToken: SERVICE, ...options }).listen(0, '127.0.0.1');
@@ -330,7 +340,7 @@ describe('concurrencia e idempotencia (PostgreSQL real)', { skip: !pool }, () =>
   });
 });
 
-describe('migraciones y /ready sin esquema (PostgreSQL real)', { skip: !pool }, () => {
+describe('migraciones y /ready sin esquema (PostgreSQL real)', { skip: skipScratch }, () => {
   const sql = readFileSync(new URL('../migrations/001-carrito.sql', import.meta.url), 'utf8');
   const names = ['ready', 'serie', 'virgen'].map((n) => `qa_${n}_${randomUUID().replaceAll('-', '').slice(0, 10)}`);
   const scratch = (name) => new pg.Pool({ connectionString: connectionString.replace(/\/[^/]*$/, '/' + name) });
