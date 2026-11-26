@@ -7,3 +7,6 @@ Route::get('/productos', [ProductoController::class, 'index'])->name('productos.
 Route::get('/productos/{id}', [ProductoController::class, 'show'])
     ->whereUuid('id')
     ->name('productos.show');
+Route::post('/productos', [ProductoController::class, 'store'])
+    ->middleware('admin.jwt')
+    ->name('productos.store');
