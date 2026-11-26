@@ -3,7 +3,6 @@
 namespace App\Pedidos;
 
 use Illuminate\Database\Eloquent\Model;
-use Ramsey\Uuid\Uuid;
 
 final class Pedido extends Model
 {
@@ -30,14 +29,26 @@ final class Pedido extends Model
 
     /**
      * Idempotency-Key estable por operación y pedido (UUID). Inventario/reservar y Pagos/procesar
-     * usan el id del pedido, como en el protocolo previo; el resto, un UUIDv5 derivado del id.
+     * usan el id del pedido, como en el protocolo previo; el resto, un UUID v4 derivado por hash del id y la
+     * operación (Carrito, Envíos e Inventario exigen v4: un UUIDv5 recibía 422 y el checkout nunca avanzaba).
      * Misma operación => misma clave en cada reintento, incluso tras reiniciar el proceso.
      */
     public function clave(string $operacion): string
     {
         return in_array($operacion, ['reservar', 'pagar'], true)
             ? $this->id
-            : Uuid::uuid5($this->id, $operacion)->toString();
+            : self::uuidV4Derivado($this->id.'|'.$operacion);
+    }
+
+    /** UUID con bits de versión 4 y variante RFC 4122 a partir de un hash determinista (no es aleatorio). */
+    private static function uuidV4Derivado(string $semilla): string
+    {
+        $bytes = substr(hash('sha256', $semilla, true), 0, 16);
+        $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
+        $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
+        $hex = bin2hex($bytes);
+
+        return sprintf('%s-%s-%s-%s-%s', substr($hex, 0, 8), substr($hex, 8, 4), substr($hex, 12, 4), substr($hex, 16, 4), substr($hex, 20, 12));
     }
 
     public function respuesta(): array

@@ -46,6 +46,10 @@ final class CarritoHttpTest extends TestCase
         Http::assertSent(fn (Request $r) => $r->url() === "$base/liberar" && $r->header('Idempotency-Key') === [$pedido->clave('liberar_carrito')]
             && $r->data() === ['pedido_id' => $pedido->id]);
         $this->assertTrue(Str::isUuid($pedido->clave('iniciar')));
+        // Regresion E2E: Carrito/Envios/Inventario exigen Idempotency-Key UUID v4 (el v5 anterior daba 422).
+        foreach (['iniciar', 'finalizar', 'liberar_carrito', 'liberar', 'confirmar', 'generar'] as $operacion) {
+            $this->assertTrue(Str::isUuid($pedido->clave($operacion), 4), "clave($operacion) no es UUID v4");
+        }
         $this->assertNotSame($pedido->clave('iniciar'), $pedido->clave('finalizar'));
         $this->assertSame($pedido->clave('iniciar'), $pedido->clave('iniciar'));
     }
