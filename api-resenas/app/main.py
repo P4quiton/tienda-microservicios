@@ -219,7 +219,16 @@ def create_app(
         return ReviewEnvelope(
             success=True,
             message="Reseña creada correctamente.",
-            data=ReviewResponse.model_validate(document),
+            data=ReviewResponse.model_validate(
+                {
+                    "id": document["id"],
+                    "producto_id": document["producto_id"],
+                    "usuario_id": document["usuario_id"],
+                    "calificacion": document["calificacion"],
+                    "comentario": document["comentario"],
+                    "creado_en": document["creado_en"],
+                }
+            ),
         )
 
     return app
