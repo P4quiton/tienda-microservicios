@@ -12,6 +12,7 @@ import (
 
 	"github.com/P4quiton/tienda-microservicios/api-inventario/internal/api"
 	"github.com/P4quiton/tienda-microservicios/api-inventario/internal/config"
+	"github.com/P4quiton/tienda-microservicios/api-inventario/internal/store"
 )
 
 func main() {
@@ -27,9 +28,26 @@ func run() error {
 		return err
 	}
 
+	startupContext, cancelStartup := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancelStartup()
+
+	inventoryStore, err := store.Open(
+		startupContext,
+		configuration.DatabaseHost,
+		configuration.DatabasePort,
+		configuration.DatabaseName,
+		configuration.DatabaseUser,
+		configuration.DatabasePassword,
+		configuration.DatabaseSSLMode,
+	)
+	if err != nil {
+		return err
+	}
+	defer inventoryStore.Close()
+
 	server := &http.Server{
 		Addr:              ":" + configuration.Port,
-		Handler:           api.NewRouter(),
+		Handler:           api.NewRouter(configuration, inventoryStore),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -52,5 +70,9 @@ func run() error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return server.Shutdown(ctx)
+	if err := server.Shutdown(ctx); err != nil {
+		return err
+	}
+
+	return nil
 }
