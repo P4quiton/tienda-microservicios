@@ -35,3 +35,31 @@ Leer los acuerdos antes de inicializar frameworks. Eliminar `.gitkeep` de la car
 
 ## Ejecución futura
 `docker compose up --build` será el comando de ejecución una vez integrados los servicios y el archivo Compose. Kubernetes será un despliegue alternativo, no un requisito para desarrollar cada API. No ejecutar ambos entornos completos simultáneamente si faltan recursos.
+
+## Infraestructura de bases de datos
+
+El proyecto utiliza PostgreSQL 17 y MongoDB 8 mediante Docker Compose.
+
+La configuración incluye bases de datos independientes por microservicio, usuarios con permisos limitados, autenticación mediante contraseña y almacenamiento persistente.
+
+### Inicio rápido en Windows
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\init-env.ps1
+docker compose config --quiet
+docker compose up -d --wait --wait-timeout 180
+docker compose ps
+```
+
+El generador de credenciales solamente debe ejecutarse si todavía no existe un archivo `.env`.
+
+### Puertos de desarrollo
+
+| Servicio | Puerto externo | Puerto interno |
+|---|---|---|
+| PostgreSQL | 15432 | 5432 |
+| MongoDB | 27017 | 27017 |
+
+Los puertos externos pueden configurarse mediante las variables de entorno correspondientes.
+
+Para conocer los usuarios, bases de datos, configuraciones de conexión, medidas de seguridad y procedimientos de prueba, consultar [Documentación de infraestructura](docs/infraestructura.md).

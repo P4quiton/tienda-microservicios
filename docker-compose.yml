@@ -1,0 +1,103 @@
+
+name: tienda-microservicios
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+
+    command:
+      - postgres
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - password_encryption=scram-sha-256
+
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Required}
+      POSTGRES_DB: postgres
+
+      POSTGRES_USUARIOS_PASSWORD: ${POSTGRES_USUARIOS_PASSWORD:?Required}
+      POSTGRES_PRODUCTOS_PASSWORD: ${POSTGRES_PRODUCTOS_PASSWORD:?Required}
+      POSTGRES_ENVIOS_PASSWORD: ${POSTGRES_ENVIOS_PASSWORD:?Required}
+      POSTGRES_INVENTARIO_PASSWORD: ${POSTGRES_INVENTARIO_PASSWORD:?Required}
+      POSTGRES_CARRITO_PASSWORD: ${POSTGRES_CARRITO_PASSWORD:?Required}
+      POSTGRES_PEDIDOS_PASSWORD: ${POSTGRES_PEDIDOS_PASSWORD:?Required}
+      POSTGRES_PAGOS_PASSWORD: ${POSTGRES_PAGOS_PASSWORD:?Required}
+
+      POSTGRES_INITDB_ARGS: "--auth-local=scram-sha-256 --auth-host=scram-sha-256"
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-15432}:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./infra/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+
+    networks:
+      - red-tienda
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          PGPASSWORD="$${POSTGRES_PASSWORD}"
+          psql -h 127.0.0.1
+          -U "$${POSTGRES_USER}"
+          -d postgres
+          -tAc "SELECT 1"
+          | grep -qx 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  mongodb:
+    image: mongo:8.0
+    restart: unless-stopped
+
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:?Required}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?Required}
+      MONGO_INITDB_DATABASE: db_resenas
+      MONGO_RESENAS_PASSWORD: ${MONGO_RESENAS_PASSWORD:?Required}
+
+    ports:
+      - "127.0.0.1:${MONGO_HOST_PORT:-27017}:27017"
+
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+      - ./infra/mongodb/init:/docker-entrypoint-initdb.d:ro
+
+    networks:
+      - red-tienda
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet
+          --host 127.0.0.1
+          --username "$${MONGO_INITDB_ROOT_USERNAME}"
+          --password "$${MONGO_INITDB_ROOT_PASSWORD}"
+          --authenticationDatabase admin
+          --eval "db.adminCommand('ping').ok"
+          | grep -q 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+networks:
+  red-tienda:
+    name: red-tienda
+    driver: bridge
+
+volumes:
+  postgres_data:
+  mongodb_data:
+  mongodb_config:
