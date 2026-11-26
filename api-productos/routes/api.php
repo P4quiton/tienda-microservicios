@@ -1,3 +1,9 @@
 <?php
 
-// Los endpoints del catálogo se incorporarán en los siguientes cambios.
+use App\Http\Controllers\Api\ProductoController;
+use Illuminate\Support\Facades\Route;
+
+Route::get('/productos', [ProductoController::class, 'index'])->name('productos.index');
+Route::get('/productos/{id}', [ProductoController::class, 'show'])
+    ->whereUuid('id')
+    ->name('productos.show');
