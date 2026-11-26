@@ -87,3 +87,23 @@ Revision frente a `docs/api/pagos.yaml` 1.1.0 (rama upstream/docs/checkout-contr
 - Documentado en README: 404 de `GET /api/pagos/pedido/{id}` no garantiza ausencia de solicitud en curso.
 - Pruebas (PG17 temporal): antes 86 verdes; despues 90 verdes (86 + 4).
 - Pendiente: la prueba de timeout es un abandono del cliente, no un corte real de red/BD a mitad de transaccion; no se probo reinicio del proceso entre intentos.
+
+## Decisiones del equipo (rate limiting)
+Decision del integrante 1: rate limiting y tamano de cuerpo configurables, en memoria por proceso (README lo documenta).
+
+- Implementado: `RateLimiter` (ventana fija 60 s, reloj inyectable), `RateLimitFilter` (identifica y despues limita; `/health` y `/ready` exentos), `CuerpoJson` con maximo configurable, propiedades `pagos.rate-limit.*` y `pagos.max-json-bytes` (env `RATE_LIMIT_{CONSULTA,MUTACION,CHECKOUT,INTERNA}_POR_MIN`, `MAX_JSON_BYTES`; defectos 120/30/5/300/262144). Checkout se lee pero no aplica a Pagos.
+- Idempotencia: sin expiracion ni borrado, documentado en README como decision de MVP. No se toco la logica de idempotencia ni el 409.
+- Regresion primero (PG17 temporal, rol `usr_pagos` NOSUPERUSER NOCREATEDB): con las pruebas nuevas y el codigo anterior, 97 ejecutadas, 7 fallos (1 de `ApiHostilTest` por 413, 4 de `RateLimitTest` por falta de 429, 2 de `TamanoJsonTest`; de estas, una era un error de aritmetica en mi prueba, corregido, y tras corregirla quedo 1 fallo real en rojo y 1 prueba de 401 que ya pasaba como guarda). Las 90 previas, salvo la modificada, verdes.
+- Despues: `Tests run: 98, Failures: 0, Errors: 0, Skipped: 0`, BUILD SUCCESS (90 previas + 8 nuevas: RateLimitTest 5, TamanoJsonTest 2, RateLimiterTest 1).
+- Cambios en pruebas existentes (1): `ApiHostilTest.hugeBodiesAreRejectedNotProcessed`: el cuerpo de 2 MB ahora espera 413 (antes 400, limite de 4096). El caso de 100000 `[` sigue siendo 400: cabe en el nuevo limite y falla por profundidad. `QaBase.properties` fija limites de 1000000/min para que las suites existentes no choquen con el rate limiting.
+- Efecto de contrato: cuerpo grande ahora es 413 (el contrato lista 429; 413 no esta definido en `docs/api/pagos.yaml`, que no se modifico). Esto reemplaza el hallazgo 2 ("-> 400") y la decision pendiente sobre el limite 4096 de arriba.
+
+NO VERIFICADO:
+- Limite por instancia: no se probo con varias replicas ni balanceador (por diseno es por proceso).
+- IP remota tras un proxy/ingress: se usa `getRemoteAddr()`; no se probo `X-Forwarded-For` ni se confia en el. Detras de un proxy todos los anonimos compartirian cupo.
+- Cupos con los valores por defecto (120/30/300) y bajo carga real: las pruebas usan 2-4 por minuto; no se ejecuto k6.
+- La ventana fija permite una rafaga de hasta 2x el limite en el cambio de ventana.
+- `Retry-After` y reinicio de ventana se probaron con reloj simulado (unitario), no esperando 60 s reales en HTTP.
+- Limite de la tabla en memoria (purga de entradas caducadas al superar 10000 claves): no probado.
+- Un 413 se responde sin consumir el cuerpo restante; no se verifico el comportamiento de Tomcat/proxies con cuerpos de varios MB y conexion reutilizada mas alla de la prueba de 2 MB.
+- `docker build` de la imagen sigue sin ejecutarse.
