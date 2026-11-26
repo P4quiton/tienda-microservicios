@@ -12,6 +12,7 @@ ENVIOS_VENV="${ENVIOS_VENV:-/mnt/disco/desarrollo-local/tienda/envios/api-envios
 PEDIDOS_VENDOR="${PEDIDOS_VENDOR:-/dev/shm/pedidos-runtime.7ARkWi/app/vendor}"
 PG_NAME=mojarra-pg-e2e; PG_PORT=55450
 export NOTIF_INTERVALO=3   # Envios: ciclo del outbox corto para la prueba
+export E2E_FASE=altos      # escenarios 1-14: limites altos y despacho lento; el 15 pasa a 'default' (ver servicios.sh)
 SERVICIOS=(pedidos pagos carrito envios inventario productos proxy-pagos proxy-carrito)
 
 limpiar() {

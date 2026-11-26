@@ -5,7 +5,7 @@ Verifican, como lo haria un cliente con `curl`, el flujo de compra entre **Carri
 ## Ejecutar
 
 ```sh
-./e2e/run.sh          # levanta todo, corre los 12 escenarios, apaga y limpia
+./e2e/run.sh          # levanta todo, corre los 15 escenarios, apaga y limpia
 MANTENER=1 ./e2e/run.sh   # solo levanta (depuracion); luego ./e2e/run.sh --limpiar
 ```
 
@@ -26,9 +26,10 @@ Requisitos (sin `docker build` ni red): imagenes locales `postgres:17` y `pedido
 ## Archivos
 
 - `run.sh`: orquestacion y limpieza (trap: mata procesos, `docker rm -f` del PG y de Pedidos, avisa de puertos ocupados).
-- `servicios.sh`: arrancar/matar/reiniciar cada servicio (lo usa tambien el escenario de caidas).
-- `tests/e2e.py`: escenarios (solo biblioteca estandar + PyJWT del venv de Envios).
-- `tests/despachar.py`: invoca `EnviosRepo.despachar` (el contrato no define disparador HTTP).
+- `servicios.sh`: arrancar/matar/reiniciar cada servicio (lo usan los escenarios de caidas). `E2E_FASE=altos` (por defecto: limites 100000 y despacho de Envios a 3600 s) o `default` (sin variables de limite); `E2E_SCHEDULER=1` arranca Pedidos con el CMD del Dockerfile (recuperar + `schedule:work` + servidor).
+- `tests/e2e.py`: escenarios (solo biblioteca estandar + PyJWT del venv de Envios). Sin argumentos corre los 15; con numeros corre un subconjunto contra servicios ya arriba (`MANTENER=1 ./e2e/run.sh`, luego `python tests/e2e.py 13 14`).
+  - 13: scheduler de Pedidos sin intervencion; 14: despacho automatico de Envios (`ENVIOS_DESPACHO_SEGUNDOS=3`); 15: limites por defecto (reinicia los 4 servicios sin variables de limite; ultimo escenario). El 11 comprueba que la notificacion pendiente sobrevive a reinicios de Pedidos y Envios; ya nadie invoca `despachar` ni `pedidos:recuperar` a mano en 11, 13, 14.
+  - Duracion total ~200 s.
 
 ## Notas de alcance
 

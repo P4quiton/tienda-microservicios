@@ -112,8 +112,10 @@ def n_guias(pedido_id):
     return sql("db_envios", "usr_envios", "PW_ENVIOS", f"select count(*) from envios where pedido_id='{pedido_id}'")
 
 
-def svc(accion, nombre):
-    r = subprocess.run([str(E2E / "servicios.sh"), accion, nombre], capture_output=True, text=True, timeout=180)
+def svc(accion, nombre, env=None):
+    """servicios.sh; `env` anade variables solo a esa llamada (p. ej. E2E_SCHEDULER, ENVIOS_DESPACHO_SEGUNDOS)."""
+    r = subprocess.run([str(E2E / "servicios.sh"), accion, nombre], capture_output=True, text=True, timeout=180,
+                       env=dict(os.environ, **(env or {})))
     return r.returncode, (r.stdout + r.stderr).strip()
 
 
@@ -604,8 +606,24 @@ def esc10(s):
     s.check("pedido inexistente => 404", r9.status == 404, r9)
 
 
-@escenario(11, "Envios: generar guia, rastreo y EnviosRepo.despachar -> outbox -> Pedidos pasa a enviado")
+def n_outbox(pid, estado=None):
+    cond = f" and estado='{estado}'" if estado else ""
+    return sql("db_envios", "usr_envios", "PW_ENVIOS", f"select count(*) from notificaciones_pedido where pedido_id='{pid}'{cond}")
+
+
+def esperar(cond, segundos, paso=1.0):
+    """Sondea `cond()` hasta `segundos`; devuelve (ok, segundos_transcurridos). Sin intervencion del test."""
+    t0 = time.time()
+    while time.time() - t0 < segundos:
+        if cond():
+            return True, time.time() - t0
+        time.sleep(paso)
+    return bool(cond()), time.time() - t0
+
+
+@escenario(11, "Envios: guia, rastreo, generar idempotente; la notificacion pendiente sobrevive a reinicios (Pedidos y Envios caidos)")
 def esc11(s):
+    # Parte 1: con despacho lento (3600 s) generar la guia NO notifica ni despacha.
     c = compra_pagada()
     pid, guia = c["id"], c["guia"]
     ra = http("GET", f"{URL['envios']}/api/envios/rastreo/{guia}", token=c["tok"])
@@ -615,30 +633,192 @@ def esc11(s):
     s.check("POST /generar directo (otra clave, mismo pedido y direccion) => 201 la MISMA guia",
             gen.status == 201 and gen.data["guia"] == guia and gen.data["estado"] == "preparando", gen)
     time.sleep(5)  # > intervalo del Notificador (3 s): generar la guia NO debe notificar
-    s.check("tras >1 ciclo del Notificador el pedido sigue 'pagado' (guia != enviado)", pedido(pid, c["tok"]).data["estado"] == "pagado")
-    env = dict(ENV, API_ENVIOS_DIR=str(E2E.parent / "api-envios"), DB_HOST="127.0.0.1", DB_PORT=ENV["PG_PORT"],
-               DB_DATABASE="db_envios", DB_USERNAME="usr_envios", DB_PASSWORD=ENV["PW_ENVIOS"])
-    out = subprocess.run([sys.executable, "-B", str(E2E / "tests" / "despachar.py"), pid], capture_output=True, text=True,
-                         env=env, cwd=str(E2E.parent / "api-envios"), timeout=60)
-    s.check("script despachar.py (EnviosRepo.despachar) termino sin error", out.returncode == 0, (out.stdout + out.stderr)[-400:])
-    try:
-        info = json.loads(out.stdout.strip().splitlines()[-1])
-    except (ValueError, IndexError):
-        info = {}
-    s.nota(f"despachar => {json.dumps(info, default=str)[:500]}")
-    ok = False
-    for _ in range(40):
-        if pedido(pid, c["tok"]).data["estado"] == "enviado":
-            ok = True
-            break
-        time.sleep(1)
-    s.check("el Notificador (outbox) llega a Pedidos real y el pedido pasa a 'enviado'", ok, pedido(pid, c["tok"]).data["estado"])
+    s.check("tras >1 ciclo del Notificador el pedido sigue 'pagado' (guia != enviado) y no hay outbox",
+            pedido(pid, c["tok"]).data["estado"] == "pagado" and n_outbox(pid) == "0")
+
+    # Parte 2: despacho a 8 s; se apaga Pedidos ANTES del despacho. Nadie invoca despachar a mano.
+    rc, out = svc("restart", "envios", {"ENVIOS_DESPACHO_SEGUNDOS": "8", "ENVIOS_DESPACHO_INTERVALO_SEGUNDOS": "1", "NOTIF_INTERVALO": "1"})
+    s.check("Envios reiniciado con despacho a 8 s", rc == 0, out[-80:])
+    c2 = compra_pagada()
+    pid2, guia2 = c2["id"], c2["guia"]
+    svc("kill", "pedidos")
+    # Con Pedidos caido el rastreo HTTP no sirve (Envios consulta a Pedidos para la titularidad): se lee la BD de Envios.
+    estado_envio = lambda: sql("db_envios", "usr_envios", "PW_ENVIOS", f"select estado from envios where guia='{guia2}'")
+    ok, t = esperar(lambda: estado_envio() == "en_transito", 40)
+    s.check(f"con Pedidos caido, Envios despacha solo (envio en_transito en BD en {t:.0f} s)", ok, estado_envio())
+    time.sleep(4)  # varios ciclos del Notificador contra un Pedidos caido
+    s.check("la notificacion queda 'pendiente' (1 fila, no entregada)", n_outbox(pid2, "pendiente") == "1", n_outbox(pid2))
+    fila = sql("db_envios", "usr_envios", "PW_ENVIOS", f"select * from notificaciones_pedido where pedido_id='{pid2}'")
+    s.nota(f"outbox con Pedidos caido: {fila}")
+    svc("kill", "envios")
+    rc, out = svc("start", "envios", {"ENVIOS_DESPACHO_SEGUNDOS": "8", "ENVIOS_DESPACHO_INTERVALO_SEGUNDOS": "1", "NOTIF_INTERVALO": "1"})
+    s.check("Envios muere (kill -9) y reinicia: /ready 200", rc == 0, out[-80:])
+    s.check("tras reiniciar Envios la notificacion sigue 'pendiente' (persistida en BD)", n_outbox(pid2, "pendiente") == "1", n_outbox(pid2))
+    rc, out = svc("start", "pedidos")
+    s.check("Pedidos reiniciado: /ready 200", rc == 0, out[-80:])
+    ok, t = esperar(lambda: pedido(pid2, c2["tok"]).data["estado"] == "enviado", 40)
+    s.check(f"la notificacion pendiente se entrega y el pedido pasa a 'enviado' ({t:.0f} s)", ok, pedido(pid2, c2["tok"]).data)
+    s.check("outbox: 1 fila 'enviada'", n_outbox(pid2, "enviada") == "1" and n_outbox(pid2) == "1", n_outbox(pid2))
+    # Restaurar la fase de escenarios 1-13 (despacho lento, ciclo de 3 s).
+    svc("restart", "envios", {"NOTIF_INTERVALO": "3"})
+
+
+@escenario(13, "Scheduler de Pedidos (schedule:work como el CMD del Dockerfile): recuperacion SIN intervencion")
+def esc13(s):
+    rc, out = svc("restart", "pedidos", {"E2E_SCHEDULER": "1"})
+    s.check("Pedidos reiniciado con el CMD del Dockerfile (recuperar + schedule:work + servidor)", rc == 0, out[-80:])
+    log = (TMP / "logs" / "pedidos.log").read_text(errors="replace")
+    s.nota("log de arranque: " + " | ".join(l for l in log.splitlines() if "CMD del Dockerfile" in l or "Running" in l)[:300])
+    uid, tok = nuevo_usuario()
+    p = nuevo_producto("40.00", 20)
+    agregar(uid, tok, p, 2)
+    clave = str(uuid.uuid4())
+    pagos0 = pagos_db()
+    proxy(PROXY_CARRITO, modo="refuse", ruta="/finalizar", coincidencias=0)
+    r = comprar(tok, clave)
+    s.check("finalizar del Carrito falla a mitad de la compra => POST 503", r.status == 503, r)
+    h = http("GET", f"{URL['pedidos']}/api/pedidos/usuario/{uid}", token=tok)
+    pid = h.data[0]["id"]
+    s.check("el pedido cobrado queda 'pagado' y el carrito aun tiene items",
+            h.data[0]["estado"] == "pagado" and carrito(uid, tok).data["items"][0]["cantidad"] == 2, h.data[0]["estado"])
+    # Se reinicia Carrito (kill -9 + start) y se restablece el proxy; a partir de aqui NADIE toca Pedidos.
+    svc("kill", "carrito")
+    rc, out = svc("start", "carrito")
+    proxy(PROXY_CARRITO, modo="pass", ruta="", coincidencias=0)
+    s.check("Carrito reiniciado (kill -9 + start) y proxy en modo normal", rc == 0, out[-80:])
+    ok, t = esperar(lambda: carrito(uid, tok).data["items"] == [], 110, 2)
+    s.check(f"SIN intervencion el scheduler completa el pedido: carrito vaciado en {t:.0f} s (limite 110 s)", ok, carrito(uid, tok).data)
+    log = (TMP / "logs" / "pedidos.log").read_text(errors="replace")
+    ejecuciones = [l.strip() for l in log.splitlines() if "pedidos:recuperar" in l]
+    s.nota("log del contenedor (pedidos:recuperar): " + " | ".join(ejecuciones)[-400:])
+    s.check("el log del contenedor muestra la ejecucion programada de pedidos:recuperar", any("Running" in l for l in ejecuciones), ejecuciones[-3:])
+    s.check("sin doble cobro: 1 pago aprobado del pedido y el total de pagos subio 1", pagos_db(f"pedido_id='{pid}'") == "1"
+            and pagos_db(f"pedido_id='{pid}' and estado='aprobado'") == "1" and int(pagos_db()) == int(pagos0) + 1)
+    est = inv()
+    s.check("sin doble efecto: 1 guia, reserva confirmada, stock 20 -> 18 una vez",
+            n_guias(pid) == "1" and est["reservas"][pid]["estado"] == "confirmada" and est["stock"][p]["fisico"] == 18, est["stock"][p])
+    r = comprar(tok, clave)
+    d = r.data or {}
+    s.check("repetir la clave devuelve el MISMO pedido pagado (sin crear otro)", r.status == 201 and d.get("id") == pid and d.get("estado") == "pagado",
+            f"HTTP {r.status} id={d.get('id')} esperado={pid} estado={d.get('estado')}")
+    s.check("tras repetir: sigue 1 pago, 1 guia, carrito vacio", pagos_db(f"pedido_id='{pid}'") == "1" and n_guias(pid) == "1"
+            and carrito(uid, tok).data["items"] == [])
+    # Volver a Pedidos sin scheduler para que los escenarios siguientes sean deterministas.
+    svc("restart", "pedidos")
+
+
+@escenario(14, "Despacho automatico de Envios (3 s / barrido 1 s): en_transito, outbox entregado, pedido 'enviado', sin duplicar")
+def esc14(s):
+    cfg = {"ENVIOS_DESPACHO_SEGUNDOS": "3", "ENVIOS_DESPACHO_INTERVALO_SEGUNDOS": "1", "NOTIF_INTERVALO": "1"}
+    rc, out = svc("restart", "envios", cfg)
+    s.check("Envios reiniciado con ENVIOS_DESPACHO_SEGUNDOS=3 y ENVIOS_DESPACHO_INTERVALO_SEGUNDOS=1 (notificador 1 s)", rc == 0, out[-80:])
+    c = compra_pagada()
+    pid, guia = c["id"], c["guia"]
     ra = http("GET", f"{URL['envios']}/api/envios/rastreo/{guia}", token=c["tok"])
-    s.check("rastreo => en_transito", ra.status == 200 and ra.data["estado"] == "en_transito", ra)
+    s.nota(f"rastreo justo tras la compra: {ra.status} {ra.data}")
+    ok, t = esperar(lambda: http("GET", f"{URL['envios']}/api/envios/rastreo/{guia}", token=c["tok"]).data["estado"] == "en_transito", 30, 0.5)
+    s.check(f"sin tocar nada, el rastreo pasa a en_transito ({t:.1f} s tras la compra)", ok)
+    ok, t = esperar(lambda: pedido(pid, c["tok"]).data["estado"] == "enviado", 30, 0.5)
+    s.check(f"el pedido real pasa a 'enviado' ({t:.1f} s mas)", ok, pedido(pid, c["tok"]).data["estado"])
+    ok, t = esperar(lambda: n_outbox(pid, "enviada") == "1", 15, 0.5)
     fila = sql("db_envios", "usr_envios", "PW_ENVIOS", f"select * from notificaciones_pedido where pedido_id='{pid}'")
     s.nota(f"outbox: {fila}")
-    s.check("outbox: una sola fila por pedido", sql("db_envios", "usr_envios", "PW_ENVIOS",
-            f"select count(*) from notificaciones_pedido where pedido_id='{pid}'") == "1")
+    s.check("outbox: 1 fila 'enviada' (entregada)", ok and n_outbox(pid) == "1", n_outbox(pid))
+    # Repetir: ni /generar ni esperar mas ciclos duplican guia, notificacion ni cambian el estado.
+    gen = http("POST", URL["envios"] + "/api/envios/generar", {"pedido_id": pid, "direccion": DIRECCION}, idem(),
+               service=ENV["T_PEDIDOS_ENVIOS"])
+    s.nota(f"POST /generar tras el despacho => {gen.status} {gen.data}")
+    time.sleep(6)
+    ra = http("GET", f"{URL['envios']}/api/envios/rastreo/{guia}", token=c["tok"])
+    s.check("repetir no duplica: 1 guia, 1 fila de outbox, rastreo sigue en_transito, pedido sigue 'enviado'",
+            n_guias(pid) == "1" and n_outbox(pid) == "1" and ra.data["estado"] == "en_transito"
+            and pedido(pid, c["tok"]).data["estado"] == "enviado", f"guias={n_guias(pid)} outbox={n_outbox(pid)} {ra.data}")
+    s.check("repetir /generar despues del despacho no deshace el estado (200/201 con la misma guia o 409, nunca otra guia)",
+            gen.status in (200, 201, 409) and (gen.status == 409 or gen.data["guia"] == guia), gen)
+    # Otro envio: dos pedidos a la vez se despachan una vez cada uno.
+    c2, c3 = compra_pagada(), compra_pagada()
+    ok, t = esperar(lambda: all(pedido(x["id"], x["tok"]).data["estado"] == "enviado" for x in (c2, c3)), 40, 0.5)
+    s.check(f"dos compras simultaneas se despachan solas ({t:.1f} s) con 1 fila de outbox cada una",
+            ok and n_outbox(c2["id"]) == "1" and n_outbox(c3["id"]) == "1")
+
+
+def cuerpo_grande(extra=None, kib=300):
+    d = dict(extra or {})
+    d["relleno"] = "x" * (kib * 1024)
+    return json.dumps(d).encode()
+
+
+@escenario(15, "Limites con valores por defecto: 6o checkout 429, cuerpo >256 KiB 413, health/ready exentos, 401, 130 GET => 429 tras 120")
+def esc15(s):
+    os.environ["E2E_FASE"] = "default"
+    os.environ.pop("ENVIOS_DESPACHO_SEGUNDOS", None)
+    os.environ.pop("ENVIOS_DESPACHO_INTERVALO_SEGUNDOS", None)
+    for n in ("pedidos", "carrito", "pagos", "envios"):
+        svc("kill", n)
+    for n in ("carrito", "envios", "pagos", "pedidos"):
+        rc, out = svc("start", n)
+        s.check(f"{n} reiniciado SIN variables de limite (valores por defecto)", rc == 0, out[-80:])
+    # --- a) 6o POST /api/pedidos del mismo usuario en 1 minuto
+    uid, tok = nuevo_usuario()
+    p = nuevo_producto("10.00", 50)
+    agregar(uid, tok, p, 1)
+    codigos, ultima = [], None
+    for i in range(6):
+        r = comprar(tok, str(uuid.uuid4()))
+        codigos.append(r.status)
+        ultima = r
+    s.nota(f"codigos de los 6 POST /api/pedidos del mismo usuario: {codigos}")
+    s.check("los 5 primeros POST no dan 429 (1o 201 real; el resto 409 carrito vacio, pero admitidos)",
+            codigos[0] == 201 and all(c != 429 for c in codigos[:5]), codigos)
+    ra = ultima.headers.get("Retry-After") or ultima.headers.get("retry-after")
+    s.check("el 6o => 429 con Retry-After numerico > 0", codigos[5] == 429 and (ra or "").isdigit() and int(ra) > 0, f"{ultima} Retry-After={ra}")
+    # --- b) cuerpo > 256 KiB => 413 en los 4 servicios (con credencial valida; sin ella prevalece el 401)
+    uid2, tok2 = nuevo_usuario()
+    uid3, tok3 = nuevo_usuario()
+    H = {"Content-Type": "application/json"}
+    casos = {
+        "carrito": ("POST", f"{URL['carrito']}/api/carrito/{uid2}/agregar", {"token": tok2, "headers": {"Idempotency-Key": str(uuid.uuid4())}}),
+        "pedidos": ("POST", f"{URL['pedidos']}/api/pedidos", {"token": tok3, "headers": {"Idempotency-Key": str(uuid.uuid4())}}),
+        "pagos": ("POST", f"{URL['pagos']}/api/pagos/procesar", {"service": ENV["T_PEDIDOS_PAGOS"], "headers": {"Idempotency-Key": str(uuid.uuid4())}}),
+        "envios": ("POST", f"{URL['envios']}/api/envios/cotizar", {"token": tok2, "headers": {}}),
+    }
+    for n, (m, u, kw) in casos.items():
+        r = http(m, u, raw=cuerpo_grande({"codigo_postal": "06600", "cantidad": 1}), headers={**H, **kw["headers"]},
+                 token=kw.get("token"), service=kw.get("service"))
+        s.check(f"{n}: cuerpo de 300 KiB => 413", r.status == 413, r)
+    r = http("POST", casos["envios"][1], raw=cuerpo_grande({"codigo_postal": "06600", "cantidad": 1}, 300), headers=H)
+    s.check("sin credencial y cuerpo grande sigue 401 (Envios)", r.status == 401, r)
+    r = http("POST", casos["envios"][1], raw=cuerpo_grande({"codigo_postal": "06600", "cantidad": 1}, 200), headers=H, token=tok2)
+    s.check("cuerpo de 200 KiB (bajo el tope) no da 413 (Envios cotizar)", r.status != 413, r)
+    # --- c) /health y /ready exentos (>120 peticiones) y no consumen el cupo del usuario
+    uid4, tok4 = nuevo_usuario()
+    for n in ("carrito", "pedidos", "pagos", "envios"):
+        peores = {"health": set(), "ready": set()}
+        for ruta in ("health", "ready"):
+            for _ in range(130):
+                peores[ruta].add(http("GET", f"{URL[n]}/{ruta}", timeout=15).status)
+        s.check(f"{n}: 130 x /health y 130 x /ready => solo 200 (sin 429)", peores == {"health": {200}, "ready": {200}}, peores)
+    # --- d) 401 sin credencial (cubo anonimo propio) y 130 GET autenticados => 429 tras 120
+    gets = {
+        "carrito": f"{URL['carrito']}/api/carrito/{uid4}",
+        "pedidos": f"{URL['pedidos']}/api/pedidos/usuario/{uid4}",
+        "pagos": f"{URL['pagos']}/api/pagos/pedido/{uuid.uuid4()}",
+        "envios": f"{URL['envios']}/api/envios/rastreo/{uuid.uuid4()}",
+    }
+    for n, u in gets.items():
+        sin = http("GET", u)
+        s.check(f"{n}: sin credencial => 401 (no 429)", sin.status == 401, sin)
+        estados = [http("GET", u, token=tok4).status for _ in range(130)]
+        primero = next((i + 1 for i, c in enumerate(estados) if c == 429), None)
+        r = http("GET", u, token=tok4)
+        ra = r.headers.get("Retry-After") or r.headers.get("retry-after")
+        s.check(f"{n}: 130 GET autenticados (/health y /ready antes NO consumieron cupo): primer 429 en la peticion {primero} (esperado 121); sin 429 antes",
+                primero == 121 and all(c != 429 for c in estados[:120]) and all(c == 429 for c in estados[120:]),
+                f"{n} distintos={sorted(set(estados))} primer429={primero}")
+        s.check(f"{n}: el 429 lleva Retry-After > 0", r.status == 429 and (ra or "").isdigit() and int(ra) > 0, f"{r.status} Retry-After={ra}")
+        s.check(f"{n}: con el usuario saturado /health sigue 200 y la peticion sin credencial 401",
+                http("GET", f"{URL[n]}/health").status == 200 and http("GET", u).status == 401)
+    # Dejar el entorno en fase 'altos' no es necesario: es el ultimo escenario.
 
 
 @escenario(12, "/health y /ready de cada servicio; /ready 503 con la BD detenida (docker pause del PG e2e)")
@@ -672,7 +852,8 @@ def esc12(s):
 
 def main():
     t0 = time.time()
-    for fn in [esc1, esc2, esc3, esc4, esc5, esc6, esc7, esc8, esc9, esc10, esc11, esc12]:
+    elegidos = {int(a) for a in sys.argv[1:]}
+    for fn in [f for f in [esc1, esc2, esc3, esc4, esc5, esc6, esc7, esc8, esc9, esc10, esc11, esc12, esc13, esc14, esc15] if not elegidos or f.num in elegidos]:
         fn()
     print("\n================ RESUMEN ================")
     for num, titulo, estado, fallos, nv in RESULTADOS:

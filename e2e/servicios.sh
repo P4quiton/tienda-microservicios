@@ -9,6 +9,20 @@ ROOT="$(cd "$E2E/.." && pwd)"
 source "$E2E/.tmp/env.sh"
 PIDS="$E2E/.tmp/pids"; LOGS="$E2E/.tmp/logs"; mkdir -p "$PIDS" "$LOGS"
 
+# Fases de limites: E2E_FASE=altos (escenarios 1-14: limites muy altos para no chocar y despacho de Envios
+# muy lento para que no despache solo) o E2E_FASE=default (escenario 15: SIN ninguna variable de limites,
+# valen los valores por defecto de cada servicio). Lo ya exportado por el llamador tiene prioridad.
+LIMITES_VARS=(RATE_LIMIT_CONSULTA_POR_MIN RATE_LIMIT_MUTACION_POR_MIN RATE_LIMIT_CHECKOUT_POR_MIN RATE_LIMIT_INTERNA_POR_MIN MAX_JSON_BYTES)
+if [ "${E2E_FASE:-altos}" = altos ]; then
+  for v in RATE_LIMIT_CONSULTA_POR_MIN RATE_LIMIT_MUTACION_POR_MIN RATE_LIMIT_CHECKOUT_POR_MIN RATE_LIMIT_INTERNA_POR_MIN; do
+    export "$v=${!v:-100000}"
+  done
+  export ENVIOS_DESPACHO_SEGUNDOS="${ENVIOS_DESPACHO_SEGUNDOS:-3600}"
+else
+  for v in "${LIMITES_VARS[@]}"; do unset "$v"; done
+  [ "${E2E_FASE_CONSERVA_DESPACHO:-}" = 1 ] || unset ENVIOS_DESPACHO_SEGUNDOS ENVIOS_DESPACHO_INTERVALO_SEGUNDOS
+fi
+
 puerto() {
   case "$1" in
     productos) echo 8002;; envios) echo 8003;; inventario) echo 8004;; carrito) echo 8005;;
@@ -42,7 +56,7 @@ pedidos_docker() { # args: nombre-o-"" ; resto = comando
     -v "$A/artisan:/app/artisan:ro" -v "$A/public:/app/public:ro" -v "$A/composer.json:/app/composer.json:ro" \
     -v "$PEDIDOS_VENDOR:/app/vendor:ro" -v "$E2E/.tmp/jwt-public.pem:/run/secrets/jwt-public.pem:ro" \
     --tmpfs /app/storage --tmpfs /app/bootstrap/cache \
-    -e PHP_CLI_SERVER_WORKERS=4 $(pedidos_env) -w /app pedidos-test-temporal \
+    -e PHP_CLI_SERVER_WORKERS=4 $(pedidos_env) $(for v in "${LIMITES_VARS[@]}"; do [ -n "${!v+x}" ] && echo "-e $v"; done) -w /app pedidos-test-temporal \
     sh -c 'mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs; exec "$@"' sh "$@"
 }
 
@@ -113,7 +127,18 @@ case "$cmd" in
   stop|kill) detener "$svc";;
   restart) detener "$svc"; sleep 1; arrancar "$svc" && listo "$svc";;
   _migrar_pedidos) pedidos_docker "" php artisan migrate --force;;
-  _pedidos_fg) pedidos_docker mojarra-pedidos-e2e php artisan serve --host 0.0.0.0 --port 8006 --no-reload;;
+  _pedidos_fg)
+    if [ "${E2E_SCHEDULER:-}" = 1 ]; then
+      # Mismo CMD que api-pedidos/Dockerfile (recuperar al arrancar + schedule:work + servidor), tomado del archivo.
+      CMD_DOCKERFILE=$(python3 -c 'import json,re,sys
+t=open(sys.argv[1]).read()
+m=re.findall(r"^CMD (\[.*\])\s*$",t,re.M)
+print(json.loads(m[-1])[2])' "$ROOT/api-pedidos/Dockerfile")
+      echo "CMD del Dockerfile: $CMD_DOCKERFILE"
+      pedidos_docker mojarra-pedidos-e2e sh -c "$CMD_DOCKERFILE"
+    else
+      pedidos_docker mojarra-pedidos-e2e php artisan serve --host 0.0.0.0 --port 8006 --no-reload
+    fi;;
   wait) listo "$svc" "${3:-90}";;
   *) echo "uso: $0 start|stop|kill|restart|wait <servicio>" >&2; exit 2;;
 esac
