@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Producto;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -44,6 +45,9 @@ class ProductoApiTest extends TestCase
 
     public function test_health_and_readiness_return_service_status(): void
     {
+        config()->set('session.driver', 'database');
+        Schema::drop('sessions');
+
         $this->getJson('/health')
             ->assertOk()
             ->assertExactJson(['status' => 'ok', 'service' => 'api-productos']);
