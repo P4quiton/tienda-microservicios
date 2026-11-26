@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: API pagos
-  version: 1.0.0
-  description: Java / Spring Boot / PostgreSQL | Contrato inicial propuesto y aprobado a nivel de arquitectura.
+  version: 1.1.0
+  description: Java / Spring Boot / PostgreSQL | Revisión de contratos checkout.
 servers:
 - url: http://localhost:8007
   description: Desarrollo individual
@@ -15,7 +15,9 @@ paths:
     post:
       summary: Procesar pago simulado
       description: Identidad interna autorizada. Solo Pedidos; monto positivo calculado por backend; una transacción
-        por pedido; rechazo es resultado de negocio, no error HTTP. No capturar datos bancarios reales.
+        por pedido; rechazo es resultado de negocio, no error HTTP. No capturar datos bancarios reales. Persistir
+        resultado y clave idempotente junto al efecto, con unicidad por pedido_id. Misma clave y payload devuelve
+        resultado original; payload incompatible 409 incluso con otra clave. Nunca repetir el efecto tras timeout.
       operationId: pagos_22
       security:
       - serviceAuth: []
@@ -152,7 +154,8 @@ paths:
     get:
       summary: Consultar comprobante
       description: Titular/admin o identidad interna autorizada. Verificar titular mediante API Pedidos; 404 si
-        no existe.
+        no existe. Pedidos puede consultar para recuperación; 404 no garantiza que una solicitud previa no esté
+        en curso. Reintentar procesamiento solo con la misma clave y payload.
       operationId: pagos_23
       security:
       - bearerAuth: []

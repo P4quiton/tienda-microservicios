@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: API pedidos
-  version: 1.0.0
-  description: PHP / Laravel / PostgreSQL | Contrato inicial propuesto y aprobado a nivel de arquitectura.
+  version: 1.1.0
+  description: PHP / Laravel / PostgreSQL | Revisión de contratos checkout.
 servers:
 - url: http://localhost:8006
   description: Desarrollo individual
@@ -14,9 +14,11 @@ paths:
   /api/pedidos:
     post:
       summary: Crear pedido y coordinar compra
-      description: JWT cliente o admin. Usuario desde sub; leer carrito, recalcular importes, reservar, pagar y
-        finalizar. 201 para pedido persistido incluso si pago rechazado; estado cancelado. 503 si resultado incierto;
-        reintentar misma clave.
+      description: JWT cliente/admin; usuario desde sub. Persistir pedido y clave antes de efectos externos; snapshot
+        versionado de Carrito, recalcular importes, reservar, pagar y finalizar. Un checkout activo por usuario.
+        201 pedido persistido con resultado definitivo incluso rechazo (cancelado); 503 si resultado incierto o
+        finalización pendiente, repetir misma clave para recuperar el mismo pedido. 409 si otro checkout activo
+        o carrito cambió antes de iniciar. Recuperación durable en PostgreSQL incluso sin nueva petición del cliente.
       operationId: pedidos_18
       security:
       - bearerAuth: []
@@ -271,8 +273,9 @@ paths:
   /api/pedidos/{id}/estado:
     patch:
       summary: Actualizar estado
-      description: Identidad interna autorizada. Solo identidad interna autorizada; validar transición y pago; no
-        permitir cancelación de pago aprobado.
+      description: Solo Envíos mediante X-Service-Token específico. Únicamente pagado -> enviado, tras despacho
+        real (no mera generación de guía); repetir enviado es idempotente. JWT no autorizado. Pedidos actualiza
+        pendiente -> pagado/cancelado localmente. 409 transición incompatible.
       operationId: pedidos_20
       security:
       - serviceAuth: []
@@ -355,6 +358,12 @@ paths:
         in: path
         required: true
         schema: *id001
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          format: uuid
       requestBody:
         required: true
         content:
@@ -365,10 +374,7 @@ paths:
                 estado:
                   type: string
                   enum:
-                  - pendiente
-                  - pagado
                   - enviado
-                  - cancelado
               required:
               - estado
               additionalProperties: false

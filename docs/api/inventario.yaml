@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: API inventario
-  version: 1.0.0
-  description: Go / Gin / PostgreSQL | Contrato inicial propuesto y aprobado a nivel de arquitectura.
+  version: 1.1.0
+  description: Go / Gin / PostgreSQL | Revisión de contratos checkout.
 servers:
 - url: http://localhost:8004
   description: Desarrollo individual
@@ -112,7 +112,10 @@ paths:
     post:
       summary: Reservar existencias
       description: Identidad interna autorizada. Solo Pedidos; operación atómica para todos los artículos; 409 si
-        stock insuficiente; mismo pedido y contenido no descuenta dos veces.
+        stock insuficiente; mismo pedido y contenido no descuenta dos veces. Persistir clave, hash y resultado en
+        la misma transacción que el efecto. Una reserva por pedido; reintentos con misma clave devuelven resultado
+        registrado. No liberar por timeout ni caducar automáticamente una reserva con pago incierto. Confirmada
+        y liberada son terminales.
       operationId: inventario_11
       security:
       - serviceAuth: []
@@ -228,10 +231,18 @@ paths:
                 items:
                   type: array
                   items: *id002
+                  minItems: 1
               required:
               - pedido_id
               - items
               additionalProperties: false
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          format: uuid
   /api/inventario/reabastecer:
     post:
       summary: Reabastecer
@@ -337,7 +348,9 @@ paths:
     post:
       summary: Confirmar reserva
       description: Identidad interna autorizada. Solo Pedidos. Transición atómica e idempotente; estado final confirmada;
-        409 si transición incompatible.
+        409 si transición incompatible. Persistir clave, hash y resultado en la misma transacción que el efecto.
+        Una reserva por pedido; reintentos con misma clave devuelven resultado registrado. No liberar por timeout
+        ni caducar automáticamente una reserva con pago incierto. Confirmada y liberada son terminales.
       operationId: inventario_13
       security:
       - serviceAuth: []
@@ -426,11 +439,20 @@ paths:
               required:
               - pedido_id
               additionalProperties: false
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          format: uuid
   /api/inventario/liberar:
     post:
       summary: Liberar reserva
       description: Identidad interna autorizada. Solo Pedidos. Transición atómica e idempotente; estado final liberada;
-        409 si transición incompatible.
+        409 si transición incompatible. Persistir clave, hash y resultado en la misma transacción que el efecto.
+        Una reserva por pedido; reintentos con misma clave devuelven resultado registrado. No liberar por timeout
+        ni caducar automáticamente una reserva con pago incierto. Confirmada y liberada son terminales.
       operationId: inventario_14
       security:
       - serviceAuth: []
@@ -519,6 +541,13 @@ paths:
               required:
               - pedido_id
               additionalProperties: false
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          format: uuid
   /health:
     get:
       summary: Proceso activo

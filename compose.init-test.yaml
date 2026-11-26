@@ -1,0 +1,10 @@
+services:
+  postgres:
+    ports: !reset []
+
+  mongodb:
+    ports: !reset []
+
+networks:
+  red-tienda:
+    name: red-tienda-init-test
