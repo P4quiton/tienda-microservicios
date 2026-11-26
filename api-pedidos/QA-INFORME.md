@@ -61,7 +61,7 @@ Decisión de diseño: el tope responde 422 y no 413, porque el contrato OpenAPI 
 - **NO VERIFICADO**: `docker build` de la imagen del servicio. La regla lo prohíbe y no hay disco (la raíz tenía 1.3 GB libres).
 - **NO VERIFICADO**: el checkout contra el Carrito real (ver "Contrato 1.1.0"; `CarritoSinContrato` ya no existe). Las pruebas de checkout usan dobles. Concurrencia e idempotencia se probaron a nivel `Compra::ejecutar` con procesos paralelos, no con HTTP concurrente contra los 4 workers.
 - (Resuelto en 1.1.0) `PATCH /estado` ya está abierto solo para Envíos; ver "Contrato 1.1.0".
-- Sin rate limiting en la API (el contrato lista 429). Recomendable en el proxy Nginx, junto con el límite de cuerpo.
+- (Resuelto, ver 'Decisiones del equipo (rate limiting y scheduler)') rate limiting y límite de cuerpo en la API.
 - Un `iat` con 1 s de desfase de reloj entre servicios se rechaza (sin tolerancia). Valorar un leeway pequeño de 5 a 10 s; hoy el comportamiento es estricto y queda como está.
 - La base solo se protege con el bloqueo advisory y el índice único; no hay `CHECK` de `estado` ni `paso`, (el índice parcial de "una compra activa por usuario" se añadió en 1.1.0). Siguen sin `CHECK` de `estado`/`paso`.
 - No hay `connect_timeout` en la conexión PostgreSQL: con un host que descarta paquetes en vez de rechazar, `/ready` podría tardar. No se probó.
@@ -101,3 +101,30 @@ De las 26 previas, 21 conservan su lógica (algunas con los dobles actualizados 
 - `GET /api/pedidos/{id}` o el historial de un checkout en curso muestra `items: []` y `total: "0.00"` hasta que se calculan los importes.
 - El bloqueo por usuario es un advisory lock de sesión (se libera si el proceso muere); no hay lease con expiración en tabla. Con `schedule:work` por réplica, varias réplicas se serializan por ese bloqueo.
 - Sin rate limiting ni `CHECK` de `estado`/`paso`, como antes.
+
+## Decisiones del equipo (rate limiting y scheduler)
+Alcance: solo `api-pedidos`; sin git, sin tocar `docs/` ni Compose.
+
+### Cambios
+- Middleware `app/Pedidos/LimitarSolicitudes.php` (registrado en `bootstrap/app.php`): identifica primero (JWT o `X-Service-Token` válidos), limita después; sin credencial, por IP y el controlador sigue dando 401. Cubos `consulta`/`mutacion`/`checkout`/`interna` por env (`config/pedidos.php`, `.env.example`). 429 con `Retry-After` y formato de error del contrato; `/health` y `/ready` exentos. Cada petición cuenta una vez (también la misma `Idempotency-Key`); el 429 ocurre antes de cualquier efecto.
+- Cuerpo: `MAX_JSON_BYTES=262144`; mayor (Content-Length o real) => 413 (antes 422 con 16 KiB), tras autenticar.
+- `Identidad`: `usuarioOrNull()` y `nombreServicio()` (comparación en tiempo constante).
+- Scheduler: `withoutOverlapping(10)` y `onOneServer()`; `CMD` del Dockerfile con bucle que relanza `schedule:work` si termina. README documenta el comando.
+- Idempotencia: sin expiración ni borrado (decisión de MVP, documentada).
+- `phpunit.xml`: límites de 100000/min para no chocar con las suites; `LimitesTest` los baja con `config()`.
+
+### Pruebas
+| Momento | Resultado |
+|---|---|
+| Base previa | 50 pruebas verdes (informe anterior) |
+| `LimitesTest` (10 pruebas) y ajuste de `QaHostilTest` escritos antes del código | rojo: 10 fallos de 60 (49 previas verdes; falló la ajustada) |
+| Después, rol `usr_pedidos` NOSUPERUSER NOCREATEDB, PG17 temporal | `OK (60 tests, 530 assertions)` |
+
+Ajuste justificado: `QaHostilTest::test_cuerpo_enorme_se_rechaza` esperaba 422 y ahora 413 por decisión del equipo; es la única previa modificada.
+
+### NO VERIFICADO
+- `docker build` y el nuevo `CMD` (prohibido); solo se revisó su sintaxis a mano. No se probó `schedule:work` en ejecución real, solo `schedule:list` y los flags del evento.
+- Límites con varias réplicas y varios workers reales: el contador es por instancia y con caché de archivo no es atómico (puede dejar pasar algunas peticiones de más bajo concurrencia). No se probó carga ni HTTP concurrente.
+- `withoutOverlapping`/`onOneServer` con caché de archivo no coordinan hosts distintos; la protección real es el advisory lock por usuario.
+- Tras un proxy, `request->ip()` es la IP del proxy salvo que se configuren proxies de confianza (no configurado): los anónimos compartirían cubo.
+- Las claves de idempotencia crecen sin límite (MVP).
