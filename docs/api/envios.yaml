@@ -1,0 +1,432 @@
+openapi: 3.0.3
+info:
+  title: API envios
+  version: 1.0.0
+  description: Python / FastAPI / PostgreSQL | Contrato inicial propuesto y aprobado a nivel de arquitectura.
+servers:
+- url: http://localhost:8003
+  description: Desarrollo individual
+- url: http://localhost:4200
+  description: Proxy frontend (solo rutas públicas o de usuario)
+- url: http://api-envios:8003
+  description: Red interna
+paths:
+  /api/envios/cotizar:
+    post:
+      summary: Cotizar envío
+      description: JWT o identidad interna autorizada. Tarifa simulada determinista por código postal y cantidad;
+        Pedidos recalcula.
+      operationId: envios_7
+      security:
+      - bearerAuth: []
+      - serviceAuth: []
+      responses:
+        '200':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      costo_envio:
+                        type: string
+                        pattern: ^\d{1,10}\.\d{2}$
+                        example: '899.99'
+                      dias_estimados:
+                        type: integer
+                        minimum: 1
+                    required:
+                    - costo_envio
+                    - dias_estimados
+                    additionalProperties: false
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                codigo_postal:
+                  type: string
+                  pattern: ^[0-9]{5}$
+                cantidad:
+                  type: integer
+                  minimum: 1
+              required:
+              - codigo_postal
+              - cantidad
+              additionalProperties: false
+  /api/envios/generar:
+    post:
+      summary: Generar guía
+      description: Identidad interna autorizada. Solo Pedidos; una guía por pedido pagado; repetir devuelve la misma
+        guía.
+      operationId: envios_8
+      security:
+      - serviceAuth: []
+      responses:
+        '201':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data: &id002
+                    type: object
+                    properties:
+                      id: &id001
+                        type: string
+                        format: uuid
+                      pedido_id: *id001
+                      guia:
+                        type: string
+                      estado:
+                        type: string
+                        enum:
+                        - preparando
+                        - en_transito
+                        - entregado
+                    required:
+                    - id
+                    - pedido_id
+                    - guia
+                    - estado
+                    additionalProperties: false
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema: *id001
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pedido_id: *id001
+                direccion:
+                  type: object
+                  properties:
+                    codigo_postal:
+                      type: string
+                      pattern: ^[0-9]{5}$
+                    calle:
+                      type: string
+                    ciudad:
+                      type: string
+                    estado:
+                      type: string
+                  required:
+                  - codigo_postal
+                  - calle
+                  - ciudad
+                  - estado
+                  additionalProperties: false
+              required:
+              - pedido_id
+              - direccion
+              additionalProperties: false
+  /api/envios/rastreo/{guia}:
+    get:
+      summary: Rastrear envío
+      description: Titular/admin o identidad interna autorizada. Validar titular consultando Pedidos o mediante
+        identidad interna autorizada.
+      operationId: envios_9
+      security:
+      - bearerAuth: []
+      - serviceAuth: []
+      responses:
+        '200':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data: *id002
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: guia
+        in: path
+        required: true
+        schema:
+          type: string
+  /health:
+    get:
+      summary: Proceso activo
+      security: []
+      responses:
+        '200':
+          description: Estado operativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ok
+                    - unavailable
+                  service:
+                    type: string
+                    example: api-envios
+                required:
+                - status
+                - service
+                additionalProperties: false
+  /ready:
+    get:
+      summary: Listo para recibir tráfico
+      security: []
+      responses:
+        '200': &id003
+          description: Estado operativo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - ok
+                    - unavailable
+                  service:
+                    type: string
+                    example: api-envios
+                required:
+                - status
+                - service
+                additionalProperties: false
+        '503': *id003
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    serviceAuth:
+      type: apiKey
+      in: header
+      name: X-Service-Token
+  schemas:
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          enum:
+          - false
+        message:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+      required:
+      - success
+      - message
+      - errors
+      additionalProperties: false
