@@ -96,6 +96,11 @@ final class QaBase {
         registry.add("pagos.pedidos-service-token-in", () -> TOKEN_IN);
         registry.add("pagos.pedidos-service-token-out", () -> TOKEN_OUT);
         registry.add("pagos.pedidos-url", () -> "http://127.0.0.1:" + PEDIDOS.getAddress().getPort());
+        // Limites altos: las suites existentes no deben chocar con el rate limiting (RateLimitTest usa limites bajos).
+        registry.add("pagos.rate-limit.consulta-por-min", () -> "1000000");
+        registry.add("pagos.rate-limit.mutacion-por-min", () -> "1000000");
+        registry.add("pagos.rate-limit.checkout-por-min", () -> "1000000");
+        registry.add("pagos.rate-limit.interna-por-min", () -> "1000000");
     }
 
     static KeyPair rsa() {

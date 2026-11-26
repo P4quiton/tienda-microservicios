@@ -150,7 +150,9 @@ class ApiHostilTest {
         var p = uuid4();
         String padding = "a".repeat(2_000_000);
         String huge = "{\"pedido_id\":\"" + p + "\",\"monto\":\"1.00\",\"metodo_pago\":\"tarjeta_simulada\",\"x\":\"" + padding + "\"}";
-        assertEnvelope(post(pedidosHeaders(uuid4()), huge), 400);
+        // Cambio (decision del equipo): cuerpo > MAX_JSON_BYTES (262144) => 413 en vez de 400 (limite antes 4096).
+        assertEnvelope(post(pedidosHeaders(uuid4()), huge), 413);
+        // 100000 bytes ya caben en el limite nuevo: se parsea y la profundidad excesiva sigue siendo 400.
         String deep = "[".repeat(100_000);
         assertEnvelope(post(pedidosHeaders(uuid4()), deep), 400);
         assertEquals(0, count());
