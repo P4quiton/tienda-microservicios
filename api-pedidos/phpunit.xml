@@ -24,6 +24,10 @@
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
+        <env name="RATE_LIMIT_CONSULTA_POR_MIN" value="100000"/>
+        <env name="RATE_LIMIT_MUTACION_POR_MIN" value="100000"/>
+        <env name="RATE_LIMIT_CHECKOUT_POR_MIN" value="100000"/>
+        <env name="RATE_LIMIT_INTERNA_POR_MIN" value="100000"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>

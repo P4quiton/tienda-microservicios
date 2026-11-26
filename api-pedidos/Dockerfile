@@ -21,5 +21,6 @@ USER www-data
 # Envíos consulta Pedidos durante checkout; se necesitan solicitudes concurrentes.
 ENV PHP_CLI_SERVER_WORKERS=4
 EXPOSE 8006
-# Recuperación durable: reconcilia al arrancar y cada minuto (schedule:work) sin depender de clientes.
-CMD ["sh", "-c", "php artisan pedidos:recuperar; php artisan schedule:work & exec php artisan serve --host=0.0.0.0 --port=8006 --no-reload"]
+# Recuperación durable: reconcilia al arrancar y cada minuto (schedule:work, reiniciado si termina)
+# sin depender de clientes. Varias réplicas se serializan por el bloqueo advisory por usuario.
+CMD ["sh", "-c", "php artisan pedidos:recuperar; (while true; do php artisan schedule:work; sleep 5; done) & exec php artisan serve --host=0.0.0.0 --port=8006 --no-reload"]

@@ -26,6 +26,16 @@ Solo hay un checkout activo por usuario (índice único parcial en PostgreSQL). 
 
 Solo Envíos con `SERVICE_TOKEN_ENVIOS_PEDIDOS` (comparación en tiempo constante) y `Idempotency-Key` UUID. Únicamente `pagado -> enviado`; repetir `enviado` responde 200 sin cambios; cualquier otra transición, 409. Los tokens de otros pares reciben 403; sin token válido o con JWT, 401. Pedidos pasa `pendiente -> pagado/cancelado` por su cuenta. Pagos y Envíos tienen además acceso interno de lectura (`GET /api/pedidos/{id}`).
 
+### Scheduler automático
+
+El `CMD` del Dockerfile ejecuta `php artisan pedidos:recuperar` al arrancar y deja `php artisan schedule:work` en un bucle que lo relanza si termina, junto a `artisan serve`. Fuera de Docker: `php artisan schedule:work` (o `* * * * * php artisan schedule:run`). Comprueba lo registrado con `php artisan schedule:list`. La tarea usa `withoutOverlapping(10)` y `onOneServer()` sobre `CACHE_STORE=file`, que es **por instancia**: esos candados no coordinan réplicas en hosts distintos. La seguridad entre réplicas la da el bloqueo advisory por usuario de PostgreSQL (`Compra`), que serializa los reintentos.
+
+## Límites de tasa y de cuerpo
+
+Configurables por entorno (`config/pedidos.php`, `.env.example`): `RATE_LIMIT_CONSULTA_POR_MIN=120` (GET con JWT), `RATE_LIMIT_MUTACION_POR_MIN=30` (otras mutaciones con JWT), `RATE_LIMIT_CHECKOUT_POR_MIN=5` (`POST /api/pedidos` por usuario), `RATE_LIMIT_INTERNA_POR_MIN=300` (por servicio con `X-Service-Token` válido, p. ej. el PATCH de Envíos) y `MAX_JSON_BYTES=262144`. La clave es la identidad autenticada (`sub` o servicio); sin credencial válida, la IP (y el controlador responde 401). `/health` y `/ready` no se limitan. Ventana fija de 60 s en la caché del proceso: **con varias réplicas el límite es por instancia**, y con `CACHE_STORE=file` y varios workers el conteo es aproximado (no atómico). Exceso: 429 con `Retry-After` y el formato de error del contrato; se emite antes de cualquier efecto, así que no deja pedidos a medias. Cada petición cuenta una vez, también una repetición con la misma `Idempotency-Key`. Cuerpo mayor al máximo (`Content-Length` declarado o cuerpo real): 413, tras autenticar.
+
+Idempotencia: las claves (`pedidos.clave_idempotencia`, `pedidos_cambios_estado`) no caducan ni se borran; es una decisión de MVP, sin expiración ni limpieza.
+
 ## Pruebas
 
 Ejecuta `composer test` con PHP 8.5. Los servicios externos se simulan con `Http::fake` (`tests/Support/ServiciosFalsos.php`). Para las comprobaciones de recuperación, configura una base PostgreSQL **exclusiva para pruebas** y habilita `TEST_POSTGRES=1`.

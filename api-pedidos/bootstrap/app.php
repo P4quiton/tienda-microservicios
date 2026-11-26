@@ -2,6 +2,7 @@
 
 use App\Pedidos\ApiError;
 use App\Pedidos\BaseNoDisponible;
+use App\Pedidos\LimitarSolicitudes;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Http\Request;
@@ -10,7 +11,7 @@ use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
-        using: fn () => Route::middleware('api')->group(base_path('routes/web.php')),
+        using: fn () => Route::middleware(['api', LimitarSolicitudes::class])->group(base_path('routes/web.php')),
         commands: __DIR__.'/../routes/console.php',
     )
     ->withMiddleware()

@@ -19,4 +19,16 @@ return [
         'pagos' => env('SERVICE_TOKEN_PAGOS_PEDIDOS'),
         'envios' => env('SERVICE_TOKEN_ENVIOS_PEDIDOS'),
     ],
+    /*
+     * Límites de tasa por minuto (ventana fija de 60 s) y tamaño máximo del cuerpo JSON.
+     * El contador vive en la caché del proceso (CACHE_STORE: array/file): con varias réplicas el límite
+     * es POR INSTANCIA, no global. Clave: identidad autenticada (sub o servicio); sin credencial, IP.
+     */
+    'limites' => [
+        'consulta' => (int) env('RATE_LIMIT_CONSULTA_POR_MIN', 120),
+        'mutacion' => (int) env('RATE_LIMIT_MUTACION_POR_MIN', 30),
+        'checkout' => (int) env('RATE_LIMIT_CHECKOUT_POR_MIN', 5),
+        'interna' => (int) env('RATE_LIMIT_INTERNA_POR_MIN', 300),
+    ],
+    'max_json_bytes' => (int) env('MAX_JSON_BYTES', 262144),
 ];

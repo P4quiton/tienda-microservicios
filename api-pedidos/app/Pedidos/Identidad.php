@@ -42,6 +42,32 @@ final class Identidad
         return ['id' => strtolower($claims->sub), 'rol' => $claims->role];
     }
 
+    /** Como usuario(), pero devuelve null si no hay JWT válido (para el limitador, que no debe responder 401). */
+    public function usuarioOrNull(Request $request): ?array
+    {
+        try {
+            return $this->usuario($request);
+        } catch (ApiError) {
+            return null;
+        }
+    }
+
+    /** Nombre del servicio cuyo X-Service-Token coincide (tiempo constante), o null. */
+    public function nombreServicio(Request $request): ?string
+    {
+        $token = $request->header('X-Service-Token');
+        if (!is_string($token) || $token === '') {
+            return null;
+        }
+        foreach (config('pedidos.tokens_entrantes') as $servicio => $secreto) {
+            if (is_string($secreto) && $secreto !== '' && hash_equals($secreto, $token)) {
+                return $servicio;
+            }
+        }
+
+        return null;
+    }
+
     public function comprobarTitular(array $usuario, string $titular): void
     {
         if ($usuario['id'] !== $titular && $usuario['rol'] !== 'admin') {

@@ -10,9 +10,6 @@ use JsonException;
 
 final class Controlador
 {
-    /** Tope del cuerpo JSON en bytes: el contrato solo admite una dirección y un método de pago. */
-    private const MAX_CUERPO = 16384;
-
     /** Tope de caracteres por campo de dirección. */
     private const MAX_CAMPO = 200;
 
@@ -137,9 +134,10 @@ final class Controlador
 
     private function json(Request $request): array
     {
-        if ((int) $request->header('Content-Length', 0) > self::MAX_CUERPO
-            || strlen($request->getContent()) > self::MAX_CUERPO) {
-            throw new ApiError(422, 'Cuerpo demasiado grande');
+        // Tope configurable (MAX_JSON_BYTES): se comprueba el Content-Length declarado y el cuerpo real.
+        $maximo = (int) config('pedidos.max_json_bytes');
+        if ((int) $request->header('Content-Length', 0) > $maximo || strlen($request->getContent()) > $maximo) {
+            throw new ApiError(413, 'Cuerpo demasiado grande');
         }
 
         try {
