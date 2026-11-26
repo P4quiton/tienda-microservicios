@@ -18,6 +18,7 @@ class Settings:
     token_envios_pedidos: str
     pedidos_url: str
     pedidos_timeout: float
+    notificacion_intervalo: float = 30.0  # segundos entre ciclos del outbox
 
 
 def _required(name: str) -> str:
@@ -46,4 +47,5 @@ def load_settings() -> Settings:
         token_envios_pedidos=token_out,
         pedidos_url=_required("API_PEDIDOS_URL").rstrip("/"),
         pedidos_timeout=float(os.environ.get("PEDIDOS_TIMEOUT_SECONDS", "3")),
+        notificacion_intervalo=float(os.environ.get("NOTIFICACION_INTERVALO_SECONDS", "30")),
     )

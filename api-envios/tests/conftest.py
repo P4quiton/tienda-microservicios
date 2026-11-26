@@ -90,6 +90,14 @@ class PedidosFalso:
     def __init__(self):
         self.pedidos: dict = {}
         self.caido = False
+        self.patch_caido = False
+        self.patches: list = []  # (pedido_id, clave) de cada intento de PATCH enviado
+
+    def marcar_enviado(self, pedido_id, clave) -> None:
+        from app.pedidos_client import NotificacionFallida
+        self.patches.append((str(pedido_id), str(clave)))
+        if self.patch_caido:
+            raise NotificacionFallida("HTTP 503")
 
     def agregar(self, usuario_id: str, estado: str = "pagado") -> str:
         pedido_id = str(uuid4())
@@ -113,7 +121,7 @@ def pedidos():
 @pytest.fixture
 def client(settings, pool, pedidos):
     with pool.connection() as conn:
-        conn.execute("TRUNCATE idempotencia, envios")
+        conn.execute("TRUNCATE notificaciones_pedido, idempotencia, envios")
     return TestClient(create_app(settings, pool, pedidos), raise_server_exceptions=False)
 
 

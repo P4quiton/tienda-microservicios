@@ -9,6 +9,10 @@ from app.errors import ApiError
 from app.ids import uuid_v4
 
 
+class NotificacionFallida(Exception):
+    """El PATCH a Pedidos no se confirmó (red, timeout o status distinto de 200): se reintenta."""
+
+
 @dataclass(frozen=True)
 class PedidoInfo:
     usuario_id: str
@@ -38,3 +42,17 @@ class PedidosClient:
             return PedidoInfo(usuario_id=uuid_v4(data["usuario_id"]), estado=str(data["estado"]))
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
             raise ApiError(503, "Pedidos no disponible o respuesta inválida") from None
+
+    def marcar_enviado(self, pedido_id: UUID, clave: UUID) -> None:
+        """PATCH /api/pedidos/{id}/estado {estado: enviado}. Solo 200 confirma; todo lo demás se reintenta."""
+        try:
+            r = httpx.patch(
+                f"{self._url}/api/pedidos/{pedido_id}/estado",
+                headers={"X-Service-Token": self._token, "Idempotency-Key": str(clave)},
+                json={"estado": "enviado"},
+                timeout=self._timeout,
+            )
+        except httpx.HTTPError as exc:
+            raise NotificacionFallida(type(exc).__name__) from None
+        if r.status_code != 200:
+            raise NotificacionFallida(f"HTTP {r.status_code}")

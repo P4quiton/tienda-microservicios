@@ -5,9 +5,11 @@ import secrets
 from uuid import UUID, uuid4
 
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from app.errors import ApiError
+from app.notificaciones import clave_estable
 from app.schemas import GenerarIn
 
 OPERACION = "generar_guia"
@@ -37,31 +39,23 @@ class EnviosRepo:
         return _a_dict(fila) if fila else None
 
     def resultado_previo(self, clave: UUID, solicitante: str, cuerpo: GenerarIn) -> dict | None:
-        """Respuesta guardada para esta clave (sin bloqueos: solo lee filas ya confirmadas).
+        """Resultado original si la clave ya se usó o el pedido ya tiene guía; None si hay que crearla.
 
-        Permite repetir una solicitud idéntica sin depender de Pedidos. None si la clave es nueva;
-        409 si se reutilizó con otro payload.
+        No consulta a Pedidos: un reintento (o una clave nueva con el mismo payload) recibe lo guardado
+        aunque Pedidos esté caído. Payload incompatible: 409, también con otra clave.
         """
-        with self._pool.connection() as conn:
-            cur = conn.cursor(row_factory=dict_row)
-            previa = cur.execute(
-                "SELECT hash_solicitud, envio_id FROM idempotencia "
-                "WHERE clave = %s AND solicitante = %s AND operacion = %s",
-                (clave, solicitante, OPERACION),
-            ).fetchone()
-            if previa is None:
-                return None
-            if previa["hash_solicitud"] != _hash(cuerpo):
-                raise ApiError(409, "Idempotency-Key reutilizada con otra solicitud")
-            return self._por_id(cur, previa["envio_id"])
+        return self._resolver(clave, solicitante, cuerpo, crear=False)
 
     def generar(self, clave: UUID, solicitante: str, cuerpo: GenerarIn) -> dict:
-        """Devuelve la guía única del pedido; crea una sola vez aunque se repita o compita.
+        """Devuelve la guía única del pedido; el efecto (guía) y la clave se confirman en una transacción.
 
-        - Misma clave + mismo payload: resultado previo. Misma clave + otro payload: 409.
-        - Clave nueva para el mismo pedido y dirección: la misma guía (una por pedido).
+        - Misma clave + mismo payload: resultado original guardado. Misma clave + otro payload: 409.
+        - Clave nueva, mismo pedido y dirección: el mismo resultado original (una guía por pedido).
         - Clave nueva con otra dirección: 409, sin asociarla a la guía anterior.
         """
+        return self._resolver(clave, solicitante, cuerpo, crear=True)
+
+    def _resolver(self, clave: UUID, solicitante: str, cuerpo: GenerarIn, crear: bool) -> dict | None:
         hash_solicitud = _hash(cuerpo)
         with self._pool.connection() as conn:
             cur = conn.cursor(row_factory=dict_row)
@@ -76,42 +70,65 @@ class EnviosRepo:
                 "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (f"pedido:{cuerpo.pedido_id}",)
             )
             previa = cur.execute(
-                "SELECT hash_solicitud, envio_id FROM idempotencia "
+                "SELECT hash_solicitud, resultado FROM idempotencia "
                 "WHERE clave = %s AND solicitante = %s AND operacion = %s",
                 (clave, solicitante, OPERACION),
             ).fetchone()
             if previa:
                 if previa["hash_solicitud"] != hash_solicitud:
                     raise ApiError(409, "Idempotency-Key reutilizada con otra solicitud")
-                return self._por_id(cur, previa["envio_id"])
+                return previa["resultado"]
 
+            d = cuerpo.direccion
             envio = cur.execute(
-                f"SELECT {COLUMNAS}, codigo_postal, calle, ciudad, estado_region "
+                "SELECT id, resultado_inicial, codigo_postal, calle, ciudad, estado_region "
                 "FROM envios WHERE pedido_id = %s", (cuerpo.pedido_id,)
             ).fetchone()
-            d = cuerpo.direccion
             if envio is not None:
-                direccion_guardada = tuple(envio.pop(campo) for campo in (
-                    "codigo_postal", "calle", "ciudad", "estado_region"
-                ))
-                if direccion_guardada != (d.codigo_postal, d.calle, d.ciudad, d.estado):
+                if (envio["codigo_postal"], envio["calle"], envio["ciudad"], envio["estado_region"]) != (
+                        d.codigo_postal, d.calle, d.ciudad, d.estado):
                     raise ApiError(409, "El pedido ya tiene una guía con otra dirección")
-            if envio is None:
-                envio = cur.execute(
-                    f"INSERT INTO envios (id, pedido_id, guia, codigo_postal, calle, ciudad, estado_region) "
-                    f"VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING {COLUMNAS}",
-                    (uuid4(), cuerpo.pedido_id, _nueva_guia(), d.codigo_postal, d.calle, d.ciudad, d.estado),
-                ).fetchone()
+                resultado, envio_id = envio["resultado_inicial"], envio["id"]
+            elif not crear:
+                return None
+            else:
+                envio_id = uuid4()
+                resultado = _a_dict({"id": envio_id, "pedido_id": cuerpo.pedido_id, "guia": _nueva_guia(),
+                                     "estado": "preparando"})
+                conn.execute(
+                    "INSERT INTO envios (id, pedido_id, guia, codigo_postal, calle, ciudad, estado_region, "
+                    "resultado_inicial) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    (envio_id, cuerpo.pedido_id, resultado["guia"], d.codigo_postal, d.calle, d.ciudad,
+                     d.estado, Jsonb(resultado)),
+                )
             conn.execute(
-                "INSERT INTO idempotencia (clave, solicitante, operacion, hash_solicitud, envio_id) "
-                "VALUES (%s, %s, %s, %s, %s)",
-                (clave, solicitante, OPERACION, hash_solicitud, envio["id"]),
+                "INSERT INTO idempotencia (clave, solicitante, operacion, hash_solicitud, envio_id, pedido_id, resultado) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (clave, solicitante, OPERACION, hash_solicitud, envio_id, cuerpo.pedido_id, Jsonb(resultado)),
+            )
+        return resultado
+
+    def despachar(self, pedido_id: UUID) -> dict | None:
+        """Despacho real: preparando -> en_transito y notificación pendiente, en una sola transacción.
+
+        Función interna (el contrato aún no define qué endpoint la dispara). Idempotente: repetirla no
+        crea otra notificación. None si el pedido no tiene guía.
+        """
+        with self._pool.connection() as conn:
+            cur = conn.cursor(row_factory=dict_row)
+            envio = cur.execute(
+                f"UPDATE envios SET estado = 'en_transito', despachado_en = now() "
+                f"WHERE pedido_id = %s AND estado = 'preparando' RETURNING {COLUMNAS}", (pedido_id,)
+            ).fetchone()
+            if envio is None:
+                envio = cur.execute(f"SELECT {COLUMNAS} FROM envios WHERE pedido_id = %s", (pedido_id,)).fetchone()
+                return _a_dict(envio) if envio else None
+            conn.execute(
+                "INSERT INTO notificaciones_pedido (id, pedido_id, envio_id, idempotency_key) "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT (pedido_id) DO NOTHING",
+                (uuid4(), pedido_id, envio["id"], clave_estable(pedido_id)),
             )
         return _a_dict(envio)
-
-    @staticmethod
-    def _por_id(cur, envio_id: UUID) -> dict:
-        return _a_dict(cur.execute(f"SELECT {COLUMNAS} FROM envios WHERE id = %s", (envio_id,)).fetchone())
 
 
 def _nueva_guia() -> str:

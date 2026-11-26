@@ -11,6 +11,7 @@ from app.config import SERVICE_NAME, Settings, load_settings
 from app.db import MigradorEnSegundoPlano, SondaListo, create_pool
 from app.en_curso import EnCurso
 from app.errors import register_error_handlers
+from app.notificaciones import Notificador
 from app.pedidos_client import PedidosClient
 from app.repositorio import EnviosRepo
 from app.routes import router
@@ -27,11 +28,16 @@ def create_app(
     esquema_listo = migrador.listo if migrador else _evento_activo()
     sonda = SondaListo(pool)
 
+    cliente_pedidos = pedidos or PedidosClient(settings)
+    notificador = Notificador(pool, cliente_pedidos, settings.notificacion_intervalo, esquema_listo)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         if migrador:
             migrador.iniciar()
+        notificador.iniciar()  # reintenta al arrancar y luego periódicamente
         yield
+        notificador.detener()
         if migrador:
             migrador.detener()
         if close_pool:
@@ -42,7 +48,8 @@ def create_app(
     app.state.pool = pool
     app.state.repo = EnviosRepo(pool)
     app.state.en_curso = EnCurso()
-    app.state.pedidos = pedidos or PedidosClient(settings)
+    app.state.pedidos = cliente_pedidos
+    app.state.notificador = notificador
     app.openapi = lambda: OPENAPI_SPEC  # el contrato manda, no el esquema inferido
     register_error_handlers(app)
     app.include_router(router)

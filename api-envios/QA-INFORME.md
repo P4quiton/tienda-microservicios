@@ -64,3 +64,24 @@ export TEST_DATABASE_URL='host=127.0.0.1 port=55433 dbname=db_envios user=postgr
    del contrato (no implementado en este servicio).
 6. Nota de entorno: el venv indicado (`envios/api-envios/.venv`) se usó sin modificarlo; el scratchpad es compartido y otro agente
    sobrescribió un archivo temporal mío (contraseña), sin otro efecto.
+
+## Contrato 1.1.0
+
+Cambios: `openapi.json` regenerado desde `upstream/docs/checkout-contracts:docs/api/envios.yaml` (v1.1.0); migración `002_contrato_1_1_0.sql`;
+`app/notificaciones.py` (outbox + trabajador); `PedidosClient.marcar_enviado`; `EnviosRepo` reescrito alrededor de un solo camino bloqueado.
+
+- **/generar**: antes el resultado guardado era solo una referencia al envío (devolvía el estado actual, no el original) y una clave nueva
+  con el mismo pedido consultaba antes a Pedidos (503 si caído, incluso con payload incompatible que debía ser 409). Ahora `resultado` JSONB
+  se persiste con la clave y el efecto en una transacción, `pedido_id` queda atado a cada clave, y repetición/payload incompatible se
+  resuelven sin Pedidos. Efecto nunca repetido: `UNIQUE(pedido_id)` en `envios` + advisory locks por clave y por pedido.
+- **Estado inicial** `preparando`; generar no notifica. **Despacho real** = `EnviosRepo.despachar` (interna). Notificación: outbox en PostgreSQL,
+  una por pedido, creada atómicamente con el paso a `en_transito`; PATCH con token propio e Idempotency-Key v4 determinista por pedido;
+  reintento al arrancar y periódico, backoff exponencial, lease contra trabajadores simultáneos; sobrevive a reinicios (prueba con un
+  `Notificador` nuevo sobre la misma BD). Probado también que la migración rellena datos preexistentes.
+- **Pruebas** (PG17 temporal en 55443): línea base `67 passed, 1 failed` (`test_openapi_json_es_el_contrato_valido`: el `openapi.json` de
+  1.0.0 difería del YAML 1.1.0 ya presente en `../docs`). Regresiones nuevas (`tests/test_despacho_outbox.py`, 19) en rojo: error de
+  colección (módulos/tablas inexistentes). Final: `87 passed, 1 warning`.
+- **Pendientes**: (1) el contrato no define el disparador del despacho real: no se inventó endpoint; falta decidir (p. ej. endpoint de
+  transportista/admin o evento) y llamar a `despachar`. (2) Un 409/4xx persistente de Pedidos se reintenta indefinidamente (tope 15 min)
+  guardando `ultimo_error`; no hay alerta ni estado de revisión manual. (3) NO VERIFICADO contra un Pedidos real (cliente probado con httpx simulado).
+  (4) La clave estable es UUID v4 por hash, no uuid5, porque `contratos-api.md` exige v4.
