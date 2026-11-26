@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: API carrito
-  version: 1.0.0
-  description: Node.js / Express / PostgreSQL | Contrato inicial propuesto y aprobado a nivel de arquitectura.
+  version: 1.1.0
+  description: Node.js / Express / PostgreSQL | Revisión de contratos checkout.
 servers:
 - url: http://localhost:8005
   description: Desarrollo individual
@@ -14,7 +14,8 @@ paths:
   /api/carrito/{usuario_id}:
     get:
       summary: Consultar carrito
-      description: 'Titular/admin o identidad interna autorizada. Sin artículos: lista vacía.'
+      description: 'Titular/admin o Pedidos. Carrito vacío: items=[]; versión inicial 0. linea_id identifica una
+        generación de línea y nunca se reutiliza tras eliminarla. Versión monotónica por usuario, incluso al vaciar.'
       operationId: carrito_15
       security:
       - bearerAuth: []
@@ -41,20 +42,31 @@ paths:
                         format: uuid
                       items:
                         type: array
-                        items: &id003
+                        items: &id006
                           type: object
                           properties:
-                            producto_id: *id001
+                            producto_id:
+                              type: string
+                              format: uuid
                             cantidad:
                               type: integer
                               minimum: 1
+                            linea_id: &id004
+                              type: string
+                              format: uuid
                           required:
                           - producto_id
                           - cantidad
+                          - linea_id
                           additionalProperties: false
+                      version: &id005
+                        type: integer
+                        minimum: 0
+                        format: int64
                     required:
                     - usuario_id
                     - items
+                    - version
                     additionalProperties: false
                 required:
                 - success
@@ -123,8 +135,9 @@ paths:
   /api/carrito/{usuario_id}/agregar:
     post:
       summary: Agregar artículo
-      description: JWT del titular o admin. Incrementa cantidad; comprobar producto y disponibilidad orientativa;
-        no reserva stock.
+      description: JWT titular o admin. Incrementar cantidad y versión de manera atómica; conservar linea_id mientras
+        exista la línea. Se permite agregar durante checkout. No reserva inventario. Repetir clave no incrementa
+        otra vez.
       operationId: carrito_16
       security:
       - bearerAuth: []
@@ -215,12 +228,22 @@ paths:
         required: true
         content:
           application/json:
-            schema: *id003
+            schema:
+              type: object
+              properties:
+                producto_id: *id001
+                cantidad:
+                  type: integer
+                  minimum: 1
+              required:
+              - producto_id
+              - cantidad
+              additionalProperties: false
   /api/carrito/{usuario_id}/vaciar:
     delete:
       summary: Vaciar carrito
-      description: Identidad interna autorizada. Solo Pedidos tras pago; repetir no falla. Durante checkout bloquear
-        cambios del carrito o aplicar control de versión para no perder nuevas adiciones.
+      description: Solo Pedidos por identidad interna. Vaciado total fuera de checkout activo; 409 si existe uno.
+        Incrementar versión si cambia el contenido. No usar en finalización de compra.
       operationId: carrito_17
       security:
       - serviceAuth: []
@@ -303,6 +326,12 @@ paths:
         in: path
         required: true
         schema: *id001
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          format: uuid
   /health:
     get:
       summary: Proceso activo
@@ -332,7 +361,7 @@ paths:
       summary: Listo para recibir tráfico
       security: []
       responses:
-        '200': &id004
+        '200': &id003
           description: Estado operativo
           content:
             application/json:
@@ -351,7 +380,352 @@ paths:
                 - status
                 - service
                 additionalProperties: false
-        '503': *id004
+        '503': *id003
+  /api/carrito/{usuario_id}/iniciar:
+    post:
+      summary: Iniciar checkout del carrito
+      description: Solo Pedidos. En una transacción bloquear carrito, verificar version_original contra versión
+        actual y crear snapshot inmutable no vacío asociado a pedido_id. Un checkout activo por usuario; 409 si
+        versión distinta u otro checkout activo. Repetición del mismo pedido y contenido devuelve snapshot original
+        aunque cambie carrito.
+      operationId: carrito_checkout_iniciar
+      security:
+      - serviceAuth: []
+      responses:
+        '200':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      pedido_id: *id004
+                      version_original: *id005
+                      items:
+                        type: array
+                        minItems: 1
+                        items: *id006
+                    required:
+                    - pedido_id
+                    - version_original
+                    - items
+                    additionalProperties: false
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: usuario_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pedido_id: *id004
+                version_original: *id005
+              required:
+              - pedido_id
+              - version_original
+              additionalProperties: false
+  /api/carrito/{usuario_id}/finalizar:
+    post:
+      summary: Finalizar checkout del carrito
+      description: Solo Pedidos tras pago aprobado. Verificar snapshot persistido, versión original e items exactos.
+        En transacción retirar cantidades del snapshot de sus linea_id, preservar adiciones posteriores, incrementar
+        versión y cerrar checkout. No exigir igualdad con versión actual. Repetición devuelve resultado registrado
+        sin nuevos descuentos; 409 si snapshot incompatible o liberado.
+      operationId: carrito_checkout_finalizar
+      security:
+      - serviceAuth: []
+      responses:
+        '200':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data: *id002
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: usuario_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pedido_id: *id004
+                version_original: *id005
+                items:
+                  type: array
+                  minItems: 1
+                  items: *id006
+              required:
+              - pedido_id
+              - version_original
+              - items
+              additionalProperties: false
+  /api/carrito/{usuario_id}/liberar:
+    post:
+      summary: Liberar checkout del carrito
+      description: Solo Pedidos tras fallo definitivo antes de cobro o rechazo confirmado. Cerrar checkout sin modificar
+        artículos. Si no existe snapshot, registrar cierre para impedir inicio tardío del mismo pedido; repetición
+        sin efecto. 409 si ya finalizado.
+      operationId: carrito_checkout_liberar
+      security:
+      - serviceAuth: []
+      responses:
+        '200':
+          description: Operación exitosa
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    enum:
+                    - true
+                  message:
+                    type: string
+                  data: *id002
+                required:
+                - success
+                - message
+                - data
+                additionalProperties: false
+        '400':
+          description: JSON incorrecto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Credencial inválida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Permiso insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: No encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Límite de peticiones
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Error interno
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Dependencia no disponible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      parameters:
+      - name: usuario_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - name: Idempotency-Key
+        in: header
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pedido_id: *id004
+              required:
+              - pedido_id
+              additionalProperties: false
 components:
   securitySchemes:
     bearerAuth:

@@ -17,3 +17,7 @@ Fijar versiones patch y lockfiles al inicializar y comprobar compatibilidad, bui
 UUID v4, JWT RS256, JSON estándar, importes decimal string en MXN, HTTP REST, Nginx como proxy, Pedidos como coordinador. No Kafka/RabbitMQ ni pasarela real. Health y readiness obligatorios. GitHub Container Registry opcional al integrar; inicialmente imágenes locales.
 
 Entorno verificado: Docker Desktop 4.100.1, Engine 29.9.3, Compose 5.7.1, Kubernetes/kubectl 1.36.1 (kubeadm). Espacio libre observado: 27.29 GB; vigilar crecimiento. No se exige idéntica versión de Docker a todos los compañeros.
+
+## Revisión checkout 1.1
+
+Saga simplificada con PostgreSQL de Pedidos como fuente de verdad. Un checkout activo por usuario; snapshot transaccional versionado en Carrito y linea_id irrepetible. Permitir agregar durante checkout; finalizar únicamente snapshot comprado. Recuperación periódica durable, sin Redis ni broker. PATCH solo Envíos al despacho real. Mantener estados comerciales originales y estado_checkout interno separado.
