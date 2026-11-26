@@ -1,6 +1,7 @@
 import express from 'express';
 import { authentication, uuidV4 } from './auth.js';
 import { ApiError } from './errors.js';
+import { createRateLimiter, loadLimits } from './limits.js';
 
 function readUUID(value, field) {
   if (typeof value !== 'string' || !uuidV4.test(value)) {
@@ -62,13 +63,34 @@ function readLines(items) {
   return lines;
 }
 
-export function createApp({ store, available, publicKey, serviceToken }) {
+export function createApp({ store, available, publicKey, serviceToken, limits = loadLimits(process.env), now }) {
   const app = express();
   const auth = authentication({ publicKey, serviceToken });
+  const hit = createRateLimiter({ limits, now });
+
+  // Autentica primero y limita después: sin credencial válida sigue siendo 401/403.
+  // Los fallos de autenticación cuentan contra la IP (cupo de consultas); sin `trust proxy`
+  // detrás de un proxy esa IP es la del proxy.
+  async function limited(req, bucket, authenticate) {
+    let identity;
+    try {
+      identity = await authenticate();
+    } catch (error) {
+      if (error.status === 401 || error.status === 403) hit('consulta', 'ip:' + req.ip);
+      throw error;
+    }
+    hit(bucket, identity);
+    return identity;
+  }
+  const asService = (req, bucket = 'interna') => limited(req, bucket, async () => {
+    auth.service(req);
+    return 'servicio:pedidos';
+  });
+  const asOwner = (req, bucket) => limited(req, bucket, () => auth.owner(req, req.params.userId.toLowerCase()));
 
   app.disable('x-powered-by');
   app.disable('etag');
-  app.use(express.json({ limit: '16kb' }));
+  app.use(express.json({ limit: limits.maxJsonBytes }));
 
   app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'api-carrito' }));
   app.get('/ready', async (_req, res) => {
@@ -87,14 +109,14 @@ export function createApp({ store, available, publicKey, serviceToken }) {
 
   app.get('/api/carrito/:userId', async (req, res) => {
     // Primero la identidad (401/403) y después la validación del parámetro (422).
-    if (req.get('X-Service-Token') !== undefined) auth.service(req);
-    else await auth.owner(req, req.params.userId.toLowerCase());
+    if (req.get('X-Service-Token') !== undefined) await asService(req);
+    else await asOwner(req, 'consulta');
     const userId = readUUID(req.params.userId, 'usuario_id');
     success(res, await store.list(userId));
   });
 
   app.post('/api/carrito/:userId/agregar', async (req, res) => {
-    const actorId = await auth.owner(req, req.params.userId.toLowerCase());
+    const actorId = await asOwner(req, 'mutacion');
     const userId = readUUID(req.params.userId, 'usuario_id');
     const key = readUUID(req.get('Idempotency-Key'), 'Idempotency-Key');
     const body = req.body;
@@ -114,7 +136,7 @@ export function createApp({ store, available, publicKey, serviceToken }) {
   // Operaciones internas de Pedidos: identidad (401), usuario (422), Idempotency-Key (422) y cuerpo (422), en ese orden.
   function internal(method, action, parseBody, run) {
     app[method]('/api/carrito/:userId/' + action, async (req, res) => {
-      auth.service(req);
+      await asService(req);
       const userId = readUUID(req.params.userId, 'usuario_id');
       const key = readUUID(req.get('Idempotency-Key'), 'Idempotency-Key');
       success(res, await run({ userId, key, ...parseBody(req.body) }));
@@ -143,13 +165,15 @@ export function createApp({ store, available, publicKey, serviceToken }) {
 
   app.use((error, _req, res, _next) => {
     let reply = error;
-    if (error.type?.startsWith('entity.')) reply = new ApiError(400, 'JSON incorrecto');
+    if (error.type === 'entity.too.large') reply = new ApiError(413, 'Cuerpo demasiado grande');
+    else if (error.type?.startsWith('entity.')) reply = new ApiError(400, 'JSON incorrecto');
     else if (!(error instanceof ApiError) && error.status >= 400 && error.status < 500) {
       // Errores de cliente de Express/body-parser (codificación, charset, ruta mal codificada...).
       reply = new ApiError(400, 'Solicitud incorrecta');
     }
     if (isDatabaseUnavailable(error)) reply = new ApiError(503, 'Base de datos no disponible');
     if (!(reply instanceof ApiError)) reply = new ApiError(500, 'Error interno');
+    if (reply.retryAfter) res.set('Retry-After', String(reply.retryAfter));
     res.status(reply.status).json({ success: false, message: reply.message, errors: reply.errors });
   });
 

@@ -35,6 +35,21 @@ Operaciones internas (solo Pedidos, `X-Service-Token` del par Pedidos->Carrito, 
 
 La misma `Idempotency-Key` con la misma solicitud devuelve el resultado registrado; con otra solicitud, 409. Un solo checkout activo por carrito. Los JSON exactos están en la sección "Contrato 1.1.0" de [QA-INFORME.md](QA-INFORME.md). El protocolo experimental `/checkout/*` y la variable `ENABLE_DRAFT_CART_CHECKOUT` se eliminaron.
 
+## Límites de uso
+
+Configurables por entorno (ver `.env.example`), en memoria por proceso con ventana fija de 60 s. **Con varias réplicas el límite es por instancia.**
+
+| Variable | Defecto | Aplica a |
+|---|---|---|
+| `RATE_LIMIT_CONSULTA_POR_MIN` | 120 | GET con JWT, por `sub` |
+| `RATE_LIMIT_MUTACION_POR_MIN` | 30 | `agregar` con JWT, por `sub` |
+| `RATE_LIMIT_INTERNA_POR_MIN` | 300 | identidad de servicio (`X-Service-Token` válido): operaciones internas y GET interno |
+| `MAX_JSON_BYTES` | 262144 | tamaño máximo del cuerpo JSON (antes 16 kB con 400; ahora 413) |
+
+`RATE_LIMIT_CHECKOUT_POR_MIN` no aplica a Carrito. Exceso => 429 con `Retry-After` y el formato de error del contrato. Primero se autentica (sin credencial sigue 401) y después se limita; los fallos de autenticación cuentan por IP. `/health` y `/ready` están exentos. Un valor inválido impide el arranque.
+
+Idempotencia: `carrito_operaciones` y `carrito_adiciones` no expiran ni se borran. Es una decisión de MVP; la retención queda pendiente.
+
 ## Pruebas
 
 ```sh
@@ -42,3 +57,5 @@ npm test
 ```
 
 Las pruebas HTTP usan una clave de prueba creada en memoria. Para ejecutar también las pruebas de idempotencia, concurrencia, snapshot y contrato 1.1.0, usa una base de pruebas desechable de PostgreSQL 17. Aplica primero las migraciones (`node src/migrate.js`) con la configuración de esa base, define `TEST_DATABASE_URL` en el entorno y ejecuta `npm test`.
+
+Las suites importan `test/env-limites-altos.js` para usar límites altos; solo `test/limites.test.js` usa límites bajos.
