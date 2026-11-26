@@ -20,3 +20,25 @@ Para cubrir ambos resultados de integración, `tarjeta_simulada` aprueba y `tran
 - Misma clave y mismo payload devuelve el resultado original (mismo `id` y `creado_en`). Un payload incompatible devuelve 409, incluso con otra clave; también 409 si el pedido ya tiene pago y llega otra clave.
 - Tras un timeout, Pedidos debe reintentar con la misma clave y payload o consultar el pago; nunca se repite el efecto.
 - `GET /api/pagos/pedido/{id}` con 404 solo indica que aún no hay pago confirmado. No garantiza que no haya una solicitud previa en curso (puede estar por confirmarse). Para recuperarse, reintentar `POST /api/pagos/procesar` con la misma clave y payload; no cancelar ni liberar por un 404.
+
+## Rate limiting y tamaño de cuerpo (decisión del equipo)
+
+Configurable por entorno (ver `.env.example`), en memoria **por proceso**: con varias réplicas el límite es por instancia, no global. Ventana fija de 60 s.
+
+| Categoría | Variable | Defecto | Aplica a |
+|---|---|---|---|
+| Consultas | `RATE_LIMIT_CONSULTA_POR_MIN` | 120 | GET con JWT |
+| Mutaciones | `RATE_LIMIT_MUTACION_POR_MIN` | 30 | POST con JWT |
+| Checkout | `RATE_LIMIT_CHECKOUT_POR_MIN` | 5 | No aplica a Pagos (se lee, sin efecto) |
+| Interna | `RATE_LIMIT_INTERNA_POR_MIN` | 300 | `X-Service-Token` válido de Pedidos: `POST /api/pagos/procesar` y consultas internas (un solo cupo por identidad de servicio) |
+| Cuerpo JSON | `MAX_JSON_BYTES` | 262144 | Máximo de bytes del cuerpo |
+
+- Clave: `sub` del JWT o identidad de servicio; sin credencial válida, IP remota (no se confía en `X-Forwarded-For`; tras un proxy habrá que decidir cómo propagar la IP real). Los GET/HEAD/OPTIONS sin autenticar usan el cupo de consultas y el resto el de mutaciones.
+- Primero se identifica al llamador y después se limita; sin credencial sigue respondiendo 401 mientras quede cupo. `/health` y `/ready` están exentos.
+- Exceso: 429 con `Retry-After` (segundos) y el sobre de error del contrato. Un 429 no ejecuta la operación ni crea pagos.
+- Cuerpo mayor que `MAX_JSON_BYTES`: 413 (antes el límite era 4096 bytes y respondía 400). Se comprueba tras autenticar y sin confiar en `Content-Length`.
+- Los límites deben ser enteros >= 1; con un valor inválido el servicio no arranca.
+
+### Idempotencia: sin expiración (decisión de MVP)
+
+Las claves de idempotencia y los pagos se conservan indefinidamente: no hay expiración ni borrado. Es una decisión de MVP; la limpieza o caducidad queda fuera de alcance.

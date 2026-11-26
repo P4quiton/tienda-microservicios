@@ -14,11 +14,11 @@ import org.springframework.http.MediaType;
 /**
  * Lectura estricta del cuerpo JSON, ejecutada DESPUES de autenticar al llamador.
  * Origen: HttpServletRequest -> bytes acotados -> JsonNode -> PagoRequest.parse (validacion de campos).
- * Reglas: solo application/json, maximo {@value #MAX_BYTES} bytes (sin confiar en Content-Length),
- * sin claves duplicadas ni texto tras el documento. Todo fallo es 400 "JSON incorrecto".
+ * Reglas: solo application/json, maximo configurable (MAX_JSON_BYTES, por defecto {@value #DEFAULT_MAX_BYTES}; sin confiar en
+ * Content-Length) => 413 si se excede; sin claves duplicadas ni texto tras el documento. El resto de fallos es 400 "JSON incorrecto".
  */
 final class CuerpoJson {
-    static final int MAX_BYTES = 4096;
+    static final int DEFAULT_MAX_BYTES = 262_144;
     private static final JsonMapper MAPPER = JsonMapper.builder()
         .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
@@ -26,12 +26,12 @@ final class CuerpoJson {
 
     private CuerpoJson() {}
 
-    static JsonNode read(HttpServletRequest request) {
+    static JsonNode read(HttpServletRequest request, int maxBytes) {
         requireJson(request.getContentType());
         try {
-            byte[] bytes = request.getInputStream().readNBytes(MAX_BYTES + 1);
-            if (bytes.length > MAX_BYTES) {
-                throw new ApiError(400, "JSON incorrecto");
+            byte[] bytes = request.getInputStream().readNBytes(maxBytes + 1);
+            if (bytes.length > maxBytes) {
+                throw new ApiError(413, "Cuerpo demasiado grande");
             }
             JsonNode node = MAPPER.readTree(bytes);
             if (node == null || node.isMissingNode()) {

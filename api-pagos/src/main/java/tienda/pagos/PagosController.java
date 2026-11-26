@@ -1,6 +1,7 @@
 package tienda.pagos;
 
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,6 +14,8 @@ import org.springframework.web.bind.annotation.RestController;
 class PagosController {
     private final PagosRepository repository;
     private final PaymentAccess access;
+    @Value("${pagos.max-json-bytes:" + CuerpoJson.DEFAULT_MAX_BYTES + "}")
+    private int maxJsonBytes = CuerpoJson.DEFAULT_MAX_BYTES;
 
     PagosController(PagosRepository repository, PaymentAccess access) {
         this.repository = repository;
@@ -28,7 +31,7 @@ class PagosController {
     ) {
         access.requirePedidos(serviceToken, authorization);
         var key = PagoRequest.uuid(idempotencyKey, "Idempotency-Key");
-        var pago = repository.process(PagoRequest.parse(CuerpoJson.read(request)), key);
+        var pago = repository.process(PagoRequest.parse(CuerpoJson.read(request, maxJsonBytes)), key);
         return ResponseEntity.status(201).body(new Success(true, "OK", pago));
     }
 
