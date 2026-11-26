@@ -9,7 +9,10 @@ use Illuminate\Support\Facades\Route;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 return Application::configure(basePath: dirname(__DIR__))
-    ->withRouting(using: fn () => Route::middleware('api')->group(base_path('routes/web.php')))
+    ->withRouting(
+        using: fn () => Route::middleware('api')->group(base_path('routes/web.php')),
+        commands: __DIR__.'/../routes/console.php',
+    )
     ->withMiddleware()
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

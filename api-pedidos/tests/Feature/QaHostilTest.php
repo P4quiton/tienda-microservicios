@@ -2,14 +2,12 @@
 
 namespace Tests\Feature;
 
-use App\Pedidos\CarritoCheckout;
 use App\Pedidos\Pedido;
 use Firebase\JWT\JWT;
-use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Tests\Support\ServiciosFalsos;
 use Tests\TestCase;
 
 /**
@@ -261,14 +259,20 @@ final class QaHostilTest extends TestCase
         }
     }
 
-    public function test_patch_estado_permanece_cerrado_aun_con_token_de_servicio_valido(): void
+    public function test_patch_estado_solo_acepta_el_token_de_envios_y_otros_pares_son_403(): void
     {
         config(['pedidos.tokens_entrantes' => ['pagos' => 'p-'.bin2hex(random_bytes(16)), 'envios' => 'e-'.bin2hex(random_bytes(16))]]);
         $id = (string) Str::uuid();
-        foreach (config('pedidos.tokens_entrantes') as $token) {
-            foreach ([['estado' => 'pagado'], ['estado' => 'cancelado'], [], ['x' => 1]] as $cuerpo) {
-                $this->withHeader('X-Service-Token', $token)->patchJson("/api/pedidos/$id/estado", $cuerpo)->assertStatus(403);
-            }
+        $cabeceras = ['Idempotency-Key' => (string) Str::uuid()];
+        foreach ([['estado' => 'enviado'], ['estado' => 'pagado'], [], ['x' => 1]] as $cuerpo) {
+            $this->withHeaders($cabeceras + ['X-Service-Token' => config('pedidos.tokens_entrantes.pagos')])
+                ->patchJson("/api/pedidos/$id/estado", $cuerpo)->assertStatus(403);
+            // Con el token de Envíos se llega a la validación: 422 si el cuerpo es inválido, nunca 401/403.
+            $this->assertNotContains(
+                $this->withHeaders($cabeceras + ['X-Service-Token' => config('pedidos.tokens_entrantes.envios')])
+                    ->patchJson("/api/pedidos/$id/estado", $cuerpo)->getStatusCode(),
+                [401, 403],
+            );
         }
     }
 
@@ -326,39 +330,9 @@ final class QaHostilTest extends TestCase
     }
 
     /** Sustituye carrito y dependencias HTTP por dobles para completar una compra. */
-    private function flujoCompletoSimulado(string $usuario, array &$llamadas = []): void
+    private function flujoCompletoSimulado(string $usuario): ServiciosFalsos
     {
-        $producto = (string) Str::uuid();
-        $this->app->instance(CarritoCheckout::class, new class($producto) implements CarritoCheckout {
-            public function __construct(private string $producto) {}
-
-            public function leer(string $usuarioId): array
-            {
-                return ['carrito_id' => $usuarioId, 'version' => '1', 'items' => [['producto_id' => $this->producto, 'cantidad' => 1]]];
-            }
-
-            public function preparar(Pedido $pedido): void {}
-
-            public function cancelar(Pedido $pedido): void {}
-
-            public function confirmar(Pedido $pedido): void {}
-        });
-        config(['pedidos.tokens_salientes' => ['inventario' => 't', 'pagos' => 't', 'envios' => 't']]);
-        Http::fake(function (Request $peticion) use (&$llamadas) {
-            $ruta = basename(parse_url($peticion->url(), PHP_URL_PATH));
-            $llamadas[] = $ruta;
-            $id = ['pedido_id' => $peticion->data()['pedido_id'] ?? null];
-            $datos = match ($ruta) {
-                'cotizar' => ['costo_envio' => '4.00'],
-                'reservar' => $id + ['estado' => 'reservada'],
-                'procesar' => $id + ['estado' => 'aprobado', 'monto' => '9.00'],
-                'confirmar' => $id + ['estado' => 'confirmada'],
-                'generar' => $id + ['guia' => 'GUIA-FICTICIA'],
-                default => ['precio' => '5.00'],
-            };
-
-            return Http::response(['success' => true, 'data' => $datos]);
-        });
+        return ServiciosFalsos::nuevo($usuario)->instalar();
     }
 
     // ---------- idempotencia y concurrencia ----------
@@ -367,8 +341,7 @@ final class QaHostilTest extends TestCase
     {
         $this->postgres();
         $usuario = (string) Str::uuid();
-        $llamadas = [];
-        $this->flujoCompletoSimulado($usuario, $llamadas);
+        $servicios = $this->flujoCompletoSimulado($usuario);
         $token = $this->jwt($this->claims([], $usuario));
         $clave = (string) Str::uuid();
         try {
@@ -376,8 +349,9 @@ final class QaHostilTest extends TestCase
             $segunda = $this->crear($this->cuerpoValido(), strtoupper($clave), $token)->assertStatus(201);
             $this->assertSame($primera->json('data.id'), $segunda->json('data.id'));
             $this->assertSame(1, Pedido::where('usuario_id', $usuario)->count());
-            $this->assertSame(1, count(array_keys($llamadas, 'procesar', true)));
-            $this->assertSame(1, count(array_keys($llamadas, 'generar', true)));
+            $this->assertSame(1, $servicios->cuenta('pagos.procesar'));
+            $this->assertSame(1, $servicios->cuenta('envios.generar'));
+            $this->assertSame(1, $servicios->cuenta('carrito.finalizar'));
             $otro = $this->cuerpoValido();
             $otro['direccion']['calle'] = 'Otra';
             $this->crear($otro, $clave, $token)->assertStatus(409);
@@ -416,9 +390,9 @@ final class QaHostilTest extends TestCase
             }
             $this->assertNotEmpty(array_filter($resultados, fn ($r) => $r['status'] === 201));
             $this->assertSame(1, Pedido::where('usuario_id', $usuario)->count());
-            $this->assertSame(1, count(array_keys($llamadas, 'procesar', true)), 'cobros');
-            $this->assertSame(1, count(array_keys($llamadas, 'reservar', true)), 'reservas');
-            $this->assertSame(1, count(array_keys($llamadas, 'generar', true)), 'guías');
+            $this->assertSame(1, count(array_keys($llamadas, 'pagos.procesar', true)), 'cobros');
+            $this->assertSame(1, count(array_keys($llamadas, 'inventario.reservar', true)), 'reservas');
+            $this->assertSame(1, count(array_keys($llamadas, 'envios.generar', true)), 'guías');
             $ids = array_unique(array_column(array_filter($resultados, fn ($r) => $r['status'] === 201), 'pedido'));
             $this->assertCount(1, $ids);
         } finally {
@@ -448,10 +422,55 @@ final class QaHostilTest extends TestCase
         $llamadas = array_filter(explode("\n", (string) file_get_contents($archivo)));
         @unlink($archivo);
         try {
-            $this->assertSame(1, count(array_keys($llamadas, 'procesar', true)), 'cobros '.json_encode($estados));
+            $this->assertSame(1, count(array_keys($llamadas, 'pagos.procesar', true)), 'cobros '.json_encode($estados));
             $this->assertSame(1, Pedido::where('usuario_id', $usuario)->count(), json_encode($estados));
         } finally {
             Pedido::where('usuario_id', $usuario)->delete();
+        }
+    }
+
+
+    // ---------- checkout por HTTP (contrato 1.1.0) ----------
+
+    public function test_checkout_por_http_funciona_sin_habilitaciones_especiales_y_devuelve_201(): void
+    {
+        $this->postgres();
+        $usuario = (string) Str::uuid();
+        $servicios = $this->flujoCompletoSimulado($usuario);
+        try {
+            $this->crear($this->cuerpoValido(), null, $this->jwt($this->claims([], $usuario)))
+                ->assertStatus(201)->assertJsonPath('data.estado', 'pagado')->assertJsonPath('data.total', '9.00');
+            $this->assertSame(1, $servicios->cuenta('carrito.finalizar'));
+        } finally {
+            Pedido::where('usuario_id', $usuario)->delete();
+        }
+    }
+
+    public function test_pago_rechazado_es_201_cancelado_y_resultado_incierto_es_503_recuperable_con_la_misma_clave(): void
+    {
+        $this->postgres();
+        $usuario = (string) Str::uuid();
+        $servicios = $this->flujoCompletoSimulado($usuario);
+        $servicios->pago = 'rechazado';
+        $token = $this->jwt($this->claims([], $usuario));
+        try {
+            $this->crear($this->cuerpoValido(), null, $token)
+                ->assertStatus(201)->assertJsonPath('data.estado', 'cancelado');
+            $this->assertSame(1, $servicios->cuenta('inventario.liberar'));
+            $this->assertSame(1, $servicios->cuenta('carrito.liberar'));
+
+            // Otro usuario: el cobro queda incierto -> 503 y la misma clave recupera el mismo pedido.
+            $otro = (string) Str::uuid();
+            $s2 = $this->flujoCompletoSimulado($otro);
+            $s2->fallos['pagos.procesar'] = [503];
+            $token2 = $this->jwt($this->claims([], $otro));
+            $clave = (string) Str::uuid();
+            $this->crear($this->cuerpoValido(), $clave, $token2)->assertStatus(503);
+            $id = Pedido::where('usuario_id', $otro)->sole()->id;
+            $this->crear($this->cuerpoValido(), $clave, $token2)->assertStatus(201)->assertJsonPath('data.id', $id);
+            $this->assertSame(2, $s2->cuenta('pagos.procesar'));
+        } finally {
+            Pedido::whereIn('usuario_id', [$usuario, $otro ?? $usuario])->delete();
         }
     }
 
@@ -463,7 +482,7 @@ final class QaHostilTest extends TestCase
         $this->assertSame(0, Artisan::call('migrate'));
         $this->assertSame(0, Artisan::call('migrate'));
         $this->assertTrue(\Illuminate\Support\Facades\Schema::hasTable('pedidos'));
-        $this->assertSame(0, Artisan::call('migrate:rollback'));
+        $this->assertSame(0, Artisan::call('migrate:reset'));
         $this->assertFalse(\Illuminate\Support\Facades\Schema::hasTable('pedidos'));
         $this->getJson('/ready')->assertStatus(503);
         $this->assertSame(0, Artisan::call('migrate'));

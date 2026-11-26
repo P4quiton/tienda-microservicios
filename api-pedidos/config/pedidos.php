@@ -1,7 +1,6 @@
 <?php
 
 return [
-    'draft_cart_checkout' => env('ENABLE_DRAFT_CART_CHECKOUT', false),
     'jwt_public_key_path' => env('JWT_PUBLIC_KEY_PATH', '/run/secrets/jwt-public.pem'),
     'urls' => [
         'carrito' => env('API_CARRITO_URL', 'http://api-carrito:8005'),

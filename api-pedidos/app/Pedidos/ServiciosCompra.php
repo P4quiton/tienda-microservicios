@@ -20,6 +20,12 @@ final class ServiciosCompra
 
     private function enviar(string $servicio, string $metodo, string $ruta, array $cuerpo = [], ?string $clave = null): array
     {
+        // Configuración ausente: fallo controlado (503) antes de abrir ninguna conexión.
+        $url = config("pedidos.urls.$servicio");
+        if (!is_string($url) || trim($url) === '') {
+            Log::warning('Falta la URL de una dependencia', ['servicio' => $servicio]);
+            throw new ApiError(503, 'Dependencia no disponible');
+        }
         $cliente = Http::acceptJson()->connectTimeout(2)->timeout(5)->withoutRedirecting();
         if ($servicio !== 'productos') {
             $token = config("pedidos.tokens_salientes.$servicio");
@@ -34,14 +40,15 @@ final class ServiciosCompra
 
         try {
             $opciones = $metodo === 'POST' ? ['json' => $cuerpo] : [];
-            $respuesta = $cliente->send($metodo, rtrim(config("pedidos.urls.$servicio"), '/').$ruta, $opciones);
+            $respuesta = $cliente->send($metodo, rtrim($url, '/').$ruta, $opciones);
         } catch (ConnectionException) {
             Log::warning('Fallo de conexión a dependencia', ['servicio' => $servicio, 'metodo' => $metodo, 'status' => null]);
             throw new ApiError(503, 'Resultado de dependencia incierto');
         }
 
+        // 409 definitivo y esperado: stock insuficiente al reservar o carrito cambiado/checkout activo al iniciar.
         if (($servicio === 'inventario' && $ruta === '/api/inventario/reservar'
-            || $servicio === 'carrito' && str_ends_with($ruta, '/preparar')) && $respuesta->conflict()) {
+            || $servicio === 'carrito' && str_ends_with($ruta, '/iniciar')) && $respuesta->conflict()) {
             throw new ApiError(409, 'Conflicto al preparar la compra');
         }
 

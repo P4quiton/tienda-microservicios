@@ -4,6 +4,7 @@ namespace App\Pedidos;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use JsonException;
 
@@ -88,11 +89,50 @@ final class Controlador
         return $this->respuesta($pedido->respuesta());
     }
 
-    public function cambiarEstado(Request $request): JsonResponse
+    /**
+     * PATCH /api/pedidos/{id}/estado: exclusivo de Envíos (SERVICE_TOKEN_ENVIOS_PEDIDOS), solo pagado -> enviado.
+     * Orden: credencial (401/403), Idempotency-Key y cuerpo (422), pedido (404), transición (409).
+     * Repetir "enviado" sobre un pedido ya enviado es idempotente (200). La clave se registra solo si la
+     * operación se resuelve, de modo que Envíos puede reintentar la misma clave tras un 409 transitorio.
+     */
+    public function cambiarEstado(Request $request, string $id): JsonResponse
     {
-        // La documentación vigente aún no designa una identidad externa para mutar estados.
-        $this->identidad->servicio($request, []);
-        throw new ApiError(403, 'Permiso insuficiente');
+        $this->identidad->servicio($request, ['envios']);
+        $clave = $this->uuid($request->header('Idempotency-Key'), 'Idempotency-Key');
+        $pedidoId = $this->uuid($id, 'id');
+        $datos = $this->json($request);
+        $estado = $datos['estado'] ?? null;
+        if (array_diff(array_keys($datos), ['estado']) || !is_string($estado)
+            || !in_array($estado, ['pendiente', 'pagado', 'enviado', 'cancelado'], true)) {
+            throw new ApiError(422, 'Estado inválido', ['estado' => ['Se esperaba un estado conocido']]);
+        }
+
+        $pedido = DB::transaction(function () use ($clave, $pedidoId, $estado) {
+            $pedido = Pedido::whereKey($pedidoId)->lockForUpdate()->first();
+            if ($pedido === null) {
+                throw new ApiError(404, 'Pedido no encontrado');
+            }
+            $previo = DB::table('pedidos_cambios_estado')->where('clave', $clave)->first();
+            if ($previo !== null) {
+                if ($previo->pedido_id !== $pedidoId || $previo->estado !== $estado) {
+                    throw new ApiError(409, 'La clave ya se utilizó con otros datos');
+                }
+
+                return $pedido;
+            }
+            if ($estado !== 'enviado' || !in_array($pedido->estado, ['pagado', 'enviado'], true)) {
+                throw new ApiError(409, 'Transición de estado no permitida');
+            }
+            if ($pedido->estado === 'pagado') {
+                $pedido->estado = 'enviado';
+                $pedido->save();
+            }
+            DB::table('pedidos_cambios_estado')->insert(['clave' => $clave, 'pedido_id' => $pedidoId, 'estado' => $estado, 'creado_en' => now()]);
+
+            return $pedido;
+        });
+
+        return $this->respuesta($pedido->respuesta());
     }
 
     private function json(Request $request): array

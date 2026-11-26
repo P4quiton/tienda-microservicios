@@ -3,53 +3,99 @@
 namespace Tests\Feature;
 
 use App\Pedidos\ApiError;
-use App\Pedidos\CarritoCheckout;
 use App\Pedidos\CarritoHttp;
-use App\Pedidos\CarritoSinContrato;
 use App\Pedidos\Pedido;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Tests\Support\ServiciosFalsos;
 use Tests\TestCase;
 
+/** Adaptador de Pedidos hacia Carrito según carrito.yaml 1.1.0 (solo contra dobles HTTP). */
 final class CarritoHttpTest extends TestCase
 {
-    public function test_protocolo_y_autenticacion_del_carrito(): void
+    private function pedido(ServiciosFalsos $s): Pedido
     {
-        $usuario = (string) Str::uuid();
-        $producto = (string) Str::uuid();
-        $id = (string) Str::uuid();
-        config(['pedidos.urls.carrito' => 'http://carrito', 'pedidos.tokens_salientes.carrito' => 'secreto']);
-        Http::fake(function (Request $request) use ($usuario, $producto) {
-            $this->assertSame(['secreto'], $request->header('X-Service-Token'));
-            return Http::response(['success' => true, 'data' => strtoupper($request->method()) === 'GET'
-                ? ['carrito_id' => $usuario, 'version' => 'v1', 'items' => [['producto_id' => $producto, 'cantidad' => 2]]]
-                : ['ok' => true]]);
-        });
-        $carrito = $this->app->make(CarritoHttp::class);
-        $this->assertSame('v1', $carrito->leer($usuario)['version']);
-        $pedido = new Pedido(['id' => $id, 'usuario_id' => $usuario, 'carrito_version' => 'v1',
-            'items' => [['producto_id' => $producto, 'cantidad' => 2, 'precio_unitario' => '5.00']]]);
-        $carrito->preparar($pedido);
-        $carrito->confirmar($pedido);
-        $carrito->cancelar($pedido);
-        foreach (['preparar', 'confirmar', 'cancelar'] as $accion) {
-            Http::assertSent(fn (Request $request) => $request->url() === "http://carrito/api/carrito/$usuario/checkout/$accion"
-                && $request->data() === ['pedido_id' => $id, 'version' => 'v1', 'items' => [['producto_id' => $producto, 'cantidad' => 2]]]);
-        }
+        return new Pedido([
+            'id' => (string) Str::uuid(), 'usuario_id' => $s->usuario, 'carrito_version' => '3',
+            'snapshot' => $s->itemsSnapshot(),
+        ]);
     }
 
-    public function test_preparar_rechaza_conflicto_y_por_defecto_puerto_desactivado(): void
+    public function test_protocolo_iniciar_finalizar_liberar_con_token_idempotencia_y_linea_id(): void
     {
-        $this->assertInstanceOf(CarritoSinContrato::class, $this->app->make(CarritoCheckout::class));
-        config(['pedidos.urls.carrito' => 'http://carrito', 'pedidos.tokens_salientes.carrito' => 'secreto']);
-        Http::fake(['*' => Http::response([], 409)]);
-        $pedido = new Pedido(['id' => (string) Str::uuid(), 'usuario_id' => (string) Str::uuid(), 'carrito_version' => '1', 'items' => []]);
+        $s = ServiciosFalsos::nuevo()->instalar();
+        $carrito = $this->app->make(CarritoHttp::class);
+
+        $lectura = $carrito->leer($s->usuario);
+        $this->assertSame(3, $lectura['version']);
+        $this->assertSame($s->itemsSnapshot(), $lectura['items']);
+
+        $pedido = $this->pedido($s);
+        $this->assertSame($s->itemsSnapshot(), $carrito->iniciar($pedido));
+        $carrito->finalizar($pedido);
+        $carrito->liberar($pedido);
+
+        $base = "http://carrito/api/carrito/{$s->usuario}";
+        Http::assertSent(fn (Request $r) => $r->method() === 'GET' && $r->url() === $base && $r->header('X-Service-Token') === ['tc']);
+        Http::assertSent(fn (Request $r) => $r->url() === "$base/iniciar" && $r->header('X-Service-Token') === ['tc']
+            && $r->header('Idempotency-Key') === [$pedido->clave('iniciar')]
+            && $r->data() === ['pedido_id' => $pedido->id, 'version_original' => 3]);
+        Http::assertSent(fn (Request $r) => $r->url() === "$base/finalizar" && $r->header('Idempotency-Key') === [$pedido->clave('finalizar')]
+            && $r->data() === ['pedido_id' => $pedido->id, 'version_original' => 3, 'items' => $s->itemsSnapshot()]);
+        Http::assertSent(fn (Request $r) => $r->url() === "$base/liberar" && $r->header('Idempotency-Key') === [$pedido->clave('liberar_carrito')]
+            && $r->data() === ['pedido_id' => $pedido->id]);
+        $this->assertTrue(Str::isUuid($pedido->clave('iniciar')));
+        $this->assertNotSame($pedido->clave('iniciar'), $pedido->clave('finalizar'));
+        $this->assertSame($pedido->clave('iniciar'), $pedido->clave('iniciar'));
+    }
+
+    public function test_iniciar_traduce_409_a_conflicto_y_rechaza_snapshots_invalidos(): void
+    {
+        $s = ServiciosFalsos::nuevo()->instalar();
+        $s->version = 9; // distinta de la versión_original del pedido
+        $carrito = $this->app->make(CarritoHttp::class);
         try {
-            $this->app->make(CarritoHttp::class)->preparar($pedido);
+            $carrito->iniciar($this->pedido($s));
             $this->fail('Se esperaba conflicto');
         } catch (ApiError $error) {
             $this->assertSame(409, $error->status);
         }
+
+        $casos = [
+            'sin linea_id' => [['producto_id' => $s->producto, 'cantidad' => 1]],
+            'linea repetida' => [['producto_id' => $s->producto, 'cantidad' => 1, 'linea_id' => $s->linea], ['producto_id' => $s->producto, 'cantidad' => 1, 'linea_id' => $s->linea]],
+            'cantidad cero' => [['producto_id' => $s->producto, 'cantidad' => 0, 'linea_id' => $s->linea]],
+        ];
+        foreach ($casos as $nombre => $items) {
+            Http::swap(new \Illuminate\Http\Client\Factory);
+            Http::fake(['*' => Http::response(['success' => true, 'data' => ['usuario_id' => $s->usuario, 'version' => 3, 'items' => $items]])]);
+            try {
+                $carrito->leer($s->usuario);
+                $this->fail("Debía rechazar: $nombre");
+            } catch (ApiError $error) {
+                $this->assertSame(503, $error->status, $nombre);
+            }
+        }
+        // La versión debe ser entera.
+        Http::swap(new \Illuminate\Http\Client\Factory);
+        Http::fake(['*' => Http::response(['success' => true, 'data' => ['usuario_id' => $s->usuario, 'version' => 'v1', 'items' => []]])]);
+        $this->expectException(ApiError::class);
+        $carrito->leer($s->usuario);
+    }
+
+    public function test_sin_url_ni_token_el_fallo_es_controlado(): void
+    {
+        $s = ServiciosFalsos::nuevo()->instalar();
+        config(['pedidos.tokens_salientes.carrito' => '']);
+        try {
+            $this->app->make(CarritoHttp::class)->leer($s->usuario);
+            $this->fail('Se esperaba 503');
+        } catch (ApiError $error) {
+            $this->assertSame(503, $error->status);
+        }
+        config(['pedidos.tokens_salientes.carrito' => 'x', 'pedidos.urls.carrito' => null]);
+        $this->expectException(ApiError::class);
+        $this->app->make(CarritoHttp::class)->leer($s->usuario);
     }
 }

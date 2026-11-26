@@ -2,15 +2,15 @@
 
 namespace App\Providers;
 
-use App\Pedidos\CarritoCheckout;
-use App\Pedidos\CarritoSinContrato;
-use App\Pedidos\CarritoHttp;
+use App\Pedidos\RecuperarPedidos;
 use Illuminate\Support\ServiceProvider;
 
 final class AppServiceProvider extends ServiceProvider
 {
-    public function register(): void
+    public function boot(): void
     {
-        $this->app->bind(CarritoCheckout::class, config('pedidos.draft_cart_checkout') ? CarritoHttp::class : CarritoSinContrato::class);
+        if ($this->app->runningInConsole()) {
+            $this->commands([RecuperarPedidos::class]);
+        }
     }
 }

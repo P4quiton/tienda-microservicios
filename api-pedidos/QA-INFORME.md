@@ -1,6 +1,6 @@
 # QA hostil: api-pedidos (puerto 8006)
 
-Alcance: solo `api-pedidos`. No se tocaron `docs/`, otros servicios ni la integración HTTP de Carrito (`CarritoHttp` / `CarritoSinContrato`). No se ejecutó git. Todos los datos son ficticios.
+Alcance: solo `api-pedidos`. No se tocaron `docs/` ni otros servicios. (La integración con Carrito se reescribió después; ver la sección "Contrato 1.1.0".) No se ejecutó git. Todos los datos son ficticios.
 
 ## Entorno de pruebas
 - PHP 8.5.13 y PHPUnit 12.5.45, con la imagen local `pedidos-test-temporal` (sin build ni push).
@@ -59,11 +59,11 @@ Decisión de diseño: el tope responde 422 y no 413, porque el contrato OpenAPI 
 
 ## Pendientes y NO VERIFICADO
 - **NO VERIFICADO**: `docker build` de la imagen del servicio. La regla lo prohíbe y no hay disco (la raíz tenía 1.3 GB libres).
-- **NO VERIFICADO**: el checkout contra el Carrito real. `CarritoSinContrato` sigue devolviendo 503 por defecto, como se pidió. Las pruebas de checkout usan dobles. Concurrencia e idempotencia se probaron a nivel `Compra::ejecutar` con procesos paralelos, no con HTTP concurrente contra los 4 workers.
-- Identidad autorizada para `PATCH /estado`: sigue sin definir, es decisión del equipo (`docs/seguridad.md`). El endpoint permanece cerrado.
+- **NO VERIFICADO**: el checkout contra el Carrito real (ver "Contrato 1.1.0"; `CarritoSinContrato` ya no existe). Las pruebas de checkout usan dobles. Concurrencia e idempotencia se probaron a nivel `Compra::ejecutar` con procesos paralelos, no con HTTP concurrente contra los 4 workers.
+- (Resuelto en 1.1.0) `PATCH /estado` ya está abierto solo para Envíos; ver "Contrato 1.1.0".
 - Sin rate limiting en la API (el contrato lista 429). Recomendable en el proxy Nginx, junto con el límite de cuerpo.
 - Un `iat` con 1 s de desfase de reloj entre servicios se rechaza (sin tolerancia). Valorar un leeway pequeño de 5 a 10 s; hoy el comportamiento es estricto y queda como está.
-- La base solo se protege con el bloqueo advisory y el índice único; no hay `CHECK` de `estado` ni `paso`, ni índice parcial de "una compra activa por usuario". Añadirlos exigiría una migración nueva: decisión L3, no tomada.
+- La base solo se protege con el bloqueo advisory y el índice único; no hay `CHECK` de `estado` ni `paso`, (el índice parcial de "una compra activa por usuario" se añadió en 1.1.0). Siguen sin `CHECK` de `estado`/`paso`.
 - No hay `connect_timeout` en la conexión PostgreSQL: con un host que descarta paquetes en vez de rechazar, `/ready` podría tardar. No se probó.
 - `ApiError` (401/422) se registra como error en el log de Laravel. Es solo ruido; no se cambió.
 - `GET /usuario/{id}` no pagina. Hoy devuelve todos los pedidos del titular.
@@ -72,3 +72,32 @@ Decisión de diseño: el tope responde 422 y no 413, porque el contrato OpenAPI 
 ## Archivos
 - Nuevos: `app/Pedidos/BaseNoDisponible.php`, `tests/Feature/QaHostilTest.php`, `tests/Support/CompraWorker.php`, `QA-INFORME.md`.
 - Modificados: `bootstrap/app.php`, `app/Pedidos/Controlador.php`.
+
+## Contrato 1.1.0
+Alcance: solo `api-pedidos`; sin tocar `docs/` ni `api-carrito`; sin git. Servicios externos simulados con `Http::fake` (`tests/Support/ServiciosFalsos.php`), nada contra servicios reales.
+
+### Cambios
+- `POST /api/pedidos`: pedido y clave persistidos antes de `iniciar` y de cualquier otro efecto; snapshot versionado con `linea_id`; importes recalculados con Productos/Envíos; Inventario reservar/confirmar/liberar con `Idempotency-Key`; `finalizar`/`liberar` de Carrito; un checkout activo por usuario (409, más índice único parcial); carrito cambiado antes de iniciar: 409 sin cobro; pago rechazado: 201 `cancelado` con liberación; incierto o finalización pendiente: 503 recuperable con la misma clave; pago ambiguo: consulta a Pagos o misma clave; pedido cobrado nunca se cancela.
+- Recuperación: `pedidos:recuperar` (scheduler cada minuto, y al arrancar en el `CMD` del Dockerfile), con backoff, bloqueo por usuario y avance persistido.
+- Eliminado el 503 por defecto (`CarritoSinContrato`, `ENABLE_DRAFT_CART_CHECKOUT`, interfaz `CarritoCheckout`). Falta de URL/token: 503 controlado.
+- `PATCH /estado`: solo Envíos, `pagado -> enviado`, idempotente, `Idempotency-Key` obligatorio; migración con tabla `pedidos_cambios_estado`.
+- Migración nueva `2026_11_26_000001_checkout_recuperable_contrato_110` (idempotente, reversible); la ya aplicada no se editó. `CACHE_STORE` por defecto pasa a `file` (el scheduler necesita caché y no hay tabla `cache`).
+
+### Pruebas
+| Momento | Resultado |
+|---|---|
+| Antes (código previo, 26 pruebas) | `OK (26 tests, 242 assertions)` |
+| Nuevas pruebas escritas primero contra el código previo (50 en total) | rojo: 28 con fallo o error (13 errores, 15 fallos) |
+| Después, rol superusuario `postgres`, PG17 temporal | `OK (50 tests, 418 assertions)` |
+| Después, rol sin CREATEDB sobre BD vacía (migra desde cero) | `OK (50 tests, 418 assertions)` |
+| Sin PostgreSQL (`TEST_POSTGRES=0`) | `OK, but some tests were skipped! Tests: 50, Skipped: 28` |
+
+De las 26 previas, 21 conservan su lógica (algunas con los dobles actualizados a las rutas del contrato), 2 de `CompraTest` se adaptaron y 3 cambian por contrato: `test_patch_estado_permanece_cerrado...` (sustituida por `EstadoEnviadoTest` y `test_patch_estado_solo_acepta_el_token_de_envios...`) y las 2 de `CarritoHttpTest` (503 por defecto y protocolo provisional). `test_migraciones_son_repetibles_y_reversibles` usa `migrate:reset` en lugar de `rollback` porque ahora hay dos migraciones en lotes distintos.
+
+### Pendientes y NO VERIFICADO
+- **NO VERIFICADO**: integración real con `api-carrito`, Inventario, Pagos, Envíos y Productos; solo dobles según los YAML. `docker build` del Dockerfile (nuevo `CMD` con `schedule:work`) no ejecutado.
+- Un 404 de Productos o un 409 de Pagos se tratan como 503 reintentable: un carrito con un producto retirado deja el checkout activo con `ultimo_error` hasta revisión manual. Falta decidir una cancelación definitiva para ese caso.
+- Si `finalizar` devuelve 409 (snapshot liberado/incompatible) con el pedido ya cobrado, queda en `por_finalizar_carrito` reintentando; requiere revisión manual (no hay reembolso).
+- `GET /api/pedidos/{id}` o el historial de un checkout en curso muestra `items: []` y `total: "0.00"` hasta que se calculan los importes.
+- El bloqueo por usuario es un advisory lock de sesión (se libera si el proceso muere); no hay lease con expiración en tabla. Con `schedule:work` por réplica, varias réplicas se serializan por ese bloqueo.
+- Sin rate limiting ni `CHECK` de `estado`/`paso`, como antes.
