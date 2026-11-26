@@ -85,3 +85,26 @@ Cambios: `openapi.json` regenerado desde `upstream/docs/checkout-contracts:docs/
   transportista/admin o evento) y llamar a `despachar`. (2) Un 409/4xx persistente de Pedidos se reintenta indefinidamente (tope 15 min)
   guardando `ultimo_error`; no hay alerta ni estado de revisión manual. (3) NO VERIFICADO contra un Pedidos real (cliente probado con httpx simulado).
   (4) La clave estable es UUID v4 por hash, no uuid5, porque `contratos-api.md` exige v4.
+
+## Decisiones del equipo (despacho, rate limiting)
+
+Cambios: `app/despacho.py` (Despachador), `EnviosRepo.despachar_vencidos` (+ helper compartido con `despachar`), `app/limites.py`
+(middleware de rate limit y tamaño), campos nuevos en `Settings`/`load_settings`, arranque del despachador en el lifespan, README y `.env.example`.
+
+- **Despacho (A)**: barrido periódico (`ENVIOS_DESPACHO_SEGUNDOS`=60, `ENVIOS_DESPACHO_INTERVALO_SEGUNDOS`=5) sobre `envios.creado_en` con
+  `FOR UPDATE SKIP LOCKED`; paso a `en_transito` y fila de outbox en una transacción; el Notificador existente entrega el PATCH.
+  Sin endpoint público. Idempotente por la condición `estado = 'preparando'`.
+- **Rate limit y cuerpo (B)**: ventana deslizante por proceso. Decisión de interpretación: sin credencial válida la ruta da 401 y solo
+  consume un cubo por IP (una inundación sin credencial termina en 429); un cuerpo excesivo sin credencial da 401, con credencial 413.
+  `RATE_LIMIT_CHECKOUT_POR_MIN` se lee pero no se usa. 413 no figura en el contrato de Envíos.
+- **Idempotencia (C)**: sin expiración ni borrado; documentado en README como decisión de MVP.
+- **Pruebas** (PG17 temporal en 55453, rol `usr_envios` sin CREATEDB): línea base `87 passed`. Rojo: `tests/test_despacho_automatico.py` y
+  `tests/test_limites.py` fallaban en colección (módulo `app.despacho` y campos/`reloj` inexistentes). Final: `105 passed, 1 warning`
+  (87 previas + 6 de despacho + 12 de límites).
+- **Ajustes a pruebas previas**: solo `tests/conftest.py`: la fixture `settings` fija límites altos (10**6) para no chocar con el rate limit.
+  Ninguna prueba previa dependía de límites de tamaño (la más grande, 5000 dígitos y `calle` de 500 caracteres, queda muy por debajo de 262144).
+  El test de despacho por lifespan corre con `TestClient` como context manager; el resto de suites no arranca hilos (sin cambios).
+- **NO VERIFICADO**: varias réplicas reales (la concurrencia se probó con 4 hilos sobre la misma BD, no con procesos separados);
+  Content-Length mentiroso con servidor real (uvicorn/h11 ya acota el cuerpo al Content-Length declarado, no se probó); comportamiento tras
+  proxy (IP del socket); carga/rendimiento del middleware; ejecución con uvicorn real y Pedidos real; build Docker (prohibido).
+  El límite en memoria no se comparte entre réplicas.
