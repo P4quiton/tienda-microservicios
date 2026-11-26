@@ -13,7 +13,7 @@ const DATABASE_DOWN_CODES = ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'ENOTFOU
   '57P01', '57P02', '57P03', '57014', '53300'];
 const DATABASE_DOWN_MESSAGES = [
   'timeout exceeded when trying to connect', 'Connection terminated', 'Client has encountered a connection error',
-  'Cannot use a pool after calling end', 'Client was closed',
+  'Cannot use a pool after calling end', 'Client was closed', 'Query read timeout',
 ];
 
 // Los errores de conexión del driver no siempre traen código: se reconocen también por mensaje.
