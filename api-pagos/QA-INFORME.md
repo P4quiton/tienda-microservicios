@@ -79,3 +79,11 @@ Pruebas: `PaymentAccessConfigTest.java`, `qa/QaBase.java`, `qa/ApiHostilTest.jav
 - Rendimiento/carga sostenida (k6) no ejecutada; solo 60 pagos concurrentes locales.
 - Mockito imprime avisos de agente dinamico en JDK 21 (no afectan resultados).
 - El cache Maven `/mnt/disco/desarrollo-local/.m2` se uso en modo lectura (`-o`).
+
+## Contrato 1.1.0
+Revision frente a `docs/api/pagos.yaml` 1.1.0 (rama upstream/docs/checkout-contracts).
+- Verificado: el codigo previo YA cumplia lo exigido: fila unica con resultado + `idempotency_key` + `request_hash` (V1, UNIQUE por `pedido_id` y por clave, insert atomico); misma clave y payload devuelve el original; payload incompatible con otra clave devuelve 409; un reintento tras timeout no crea un segundo efecto. No hizo falta migracion nueva ni cambio de codigo (no hay estado "en curso": el efecto simulado y su registro son una sola transaccion).
+- Regresion rojo/verde: no fue posible observar rojo, porque no habia defecto. Se anadio `qa/Contrato110Test.java` (4 pruebas) que fija el comportamiento: fila unica por pedido, 409 con otra clave y original intacto, reintento tras abandono del cliente (timeout de 1 ms) sin segundo efecto, GET 404 sin pago.
+- Documentado en README: 404 de `GET /api/pagos/pedido/{id}` no garantiza ausencia de solicitud en curso.
+- Pruebas (PG17 temporal): antes 86 verdes; despues 90 verdes (86 + 4).
+- Pendiente: la prueba de timeout es un abandono del cliente, no un corte real de red/BD a mitad de transaccion; no se probo reinicio del proceso entre intentos.
