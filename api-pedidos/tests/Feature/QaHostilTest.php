@@ -152,8 +152,9 @@ final class QaHostilTest extends TestCase
     {
         $base = $this->cuerpoValido();
         $base['direccion']['calle'] = str_repeat('a', 2_000_000);
-        $this->assertSame(422, $this->crear($base)->getStatusCode());
-        $this->crear('['.str_repeat('1,', 500_000).'1]')->assertStatus(422);
+        // Cambio documentado: antes 422 (tope 16 KiB); ahora 413 (MAX_JSON_BYTES, 262144 por defecto).
+        $this->assertSame(413, $this->crear($base)->getStatusCode());
+        $this->crear('['.str_repeat('1,', 500_000).'1]')->assertStatus(413);
     }
 
     // ---------- JWT ----------
