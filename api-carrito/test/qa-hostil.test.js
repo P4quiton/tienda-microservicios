@@ -1,5 +1,6 @@
 // Suite QA hostil: ataca el servicio por HTTP real. Las pruebas con base de datos
 // se omiten sin TEST_DATABASE_URL (PostgreSQL 17 desechable con la migración aplicada).
+import './env-limites-altos.js';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -128,11 +129,14 @@ describe('validación de entrada (sin BD)', () => {
 
   test('cuerpos enormes y codificaciones raras se rechazan con 4xx controlado', async () => {
     const token = await jwt({ sub: user });
-    const huge = JSON.stringify({ producto_id: product, cantidad: 1, relleno: 'x'.repeat(20_000) });
-    assert.equal((await add(base, user, token, huge)).status, 400);
+    // Cambio decidido por el equipo: el máximo pasó de 16 kB (400) a 256 KiB (413); 20 kB ya cabe y llega a la validación (422).
+    const medium = JSON.stringify({ producto_id: product, cantidad: 1, relleno: 'x'.repeat(20_000) });
+    assert.equal((await add(base, user, token, medium)).status, 422);
+    const huge = JSON.stringify({ producto_id: product, cantidad: 1, relleno: 'x'.repeat(300_000) });
+    assert.equal((await add(base, user, token, huge)).status, 413);
     const enormous = JSON.stringify({ producto_id: product, cantidad: 1, relleno: 'x'.repeat(5_000_000) });
     const res = await add(base, user, token, enormous);
-    assert.ok(res.status >= 400 && res.status < 500, 'estado ' + res.status);
+    assert.equal(res.status, 413);
     const headers = { Authorization: 'Bearer ' + token, 'Idempotency-Key': randomUUID() };
     const path = `/api/carrito/${user}/agregar`;
     const body = JSON.stringify({ producto_id: product, cantidad: 1 });

@@ -1,3 +1,4 @@
+import './env-limites-altos.js';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { once } from 'node:events';

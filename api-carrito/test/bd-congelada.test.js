@@ -1,6 +1,7 @@
 // Regresion E2E: con la BD congelada (docker pause) tras haber conectado, /ready colgaba sin responder.
 // Causa: solo existia statement_timeout (lo aplica el servidor). Ahora hay query_timeout en el cliente
 // y el error resultante se traduce a 503.
+import './env-limites-altos.js';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import { once } from 'node:events';

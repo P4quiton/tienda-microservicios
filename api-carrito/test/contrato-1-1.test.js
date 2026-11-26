@@ -1,5 +1,6 @@
 // Contrato 1.1.0: version y linea_id, y endpoints internos iniciar/finalizar/liberar/vaciar.
 // Las pruebas con base de datos se omiten sin TEST_DATABASE_URL (PostgreSQL 17 con las migraciones aplicadas).
+import './env-limites-altos.js';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
