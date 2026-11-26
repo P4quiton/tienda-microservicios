@@ -1,20 +1,23 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 import logging
 from statistics import mean
-from datetime import timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials
 from pymongo import DESCENDING, MongoClient
-from pymongo.errors import PyMongoError
+from pymongo.errors import DuplicateKeyError, PyMongoError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import Settings, load_settings
 from app.database import create_mongo_client, ensure_review_indexes
-from app.errors import ApiProblem
-from app.schemas import ReviewListEnvelope, ReviewResponse
+from app.errors import ApiProblem, ProductNotFound, ProductServiceUnavailable
+from app.products import ProductVerifier
+from app.schemas import ReviewCreate, ReviewEnvelope, ReviewListEnvelope, ReviewResponse
+from app.security import bearer_scheme, current_user
 
 logger = logging.getLogger("api-resenas")
 
@@ -23,6 +26,7 @@ def create_app(
     settings: Settings | None = None,
     *,
     mongo_client: MongoClient | None = None,
+    product_verifier: ProductVerifier | None = None,
 ) -> FastAPI:
     app_settings = settings or load_settings()
     owns_client = mongo_client is None
@@ -33,6 +37,9 @@ def create_app(
         app.state.mongo_client = client
         app.state.reviews = client[app_settings.mongo_database]["resenas"]
         app.state.settings = app_settings
+        app.state.product_verifier = product_verifier or ProductVerifier(
+            app_settings.productos_api_url
+        )
         app.state.review_indexes_ready = False
         try:
             ensure_review_indexes(app.state.reviews)
@@ -150,7 +157,14 @@ def create_app(
                 created_at = created_at.astimezone(timezone.utc)
             items.append(
                 ReviewResponse.model_validate(
-                    {**document, "creado_en": created_at}
+                    {
+                        "id": document["id"],
+                        "producto_id": document["producto_id"],
+                        "usuario_id": document["usuario_id"],
+                        "calificacion": document["calificacion"],
+                        "comentario": document["comentario"],
+                        "creado_en": created_at,
+                    }
                 )
             )
         promedio = round(mean(item.calificacion for item in items), 2) if items else None
@@ -158,6 +172,54 @@ def create_app(
             success=True,
             message="Reseñas consultadas correctamente.",
             data={"items": items, "promedio": promedio, "total": len(items)},
+        )
+
+    def authenticated_user(
+        credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    ) -> dict[str, str]:
+        return current_user(credentials, app_settings)
+
+    @app.post(
+        "/api/resenas",
+        status_code=201,
+        response_model=ReviewEnvelope,
+    )
+    def create_review(
+        payload: ReviewCreate,
+        request: Request,
+        user: dict[str, str] = Depends(authenticated_user),
+    ) -> ReviewEnvelope:
+        product_id = str(payload.producto_id)
+        try:
+            request.app.state.product_verifier.exists(product_id)
+        except ProductNotFound as error:
+            raise ApiProblem(404, "El producto no existe.") from error
+        except ProductServiceUnavailable as error:
+            raise ApiProblem(503, "El servicio de productos no está disponible.") from error
+
+        created_at = datetime.now(timezone.utc)
+        document = {
+            "id": str(uuid4()),
+            "producto_id": product_id,
+            "usuario_id": user["usuario_id"],
+            "calificacion": payload.calificacion,
+            "comentario": payload.comentario,
+            "creado_en": created_at,
+        }
+        try:
+            request.app.state.reviews.insert_one(document)
+        except DuplicateKeyError as error:
+            raise ApiProblem(
+                409,
+                "El usuario ya publicó una reseña para este producto.",
+            ) from error
+        except PyMongoError as error:
+            raise ApiProblem(503, "El servicio de reseñas no está disponible.") from error
+
+        return ReviewEnvelope(
+            success=True,
+            message="Reseña creada correctamente.",
+            data=ReviewResponse.model_validate(document),
         )
 
     return app
