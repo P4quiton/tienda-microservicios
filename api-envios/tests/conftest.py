@@ -83,6 +83,8 @@ def settings(keys, conninfo):
         database_url=conninfo, jwt_public_key=keys[1], jwt_issuer=ISSUER, jwt_audience=AUDIENCE,
         token_pedidos_envios=TOKEN_IN, token_envios_pedidos=TOKEN_OUT,
         pedidos_url="http://pedidos.invalid", pedidos_timeout=1,
+        # Límites altos: las suites no deben chocar con el rate limit (las de límites los fijan a propósito).
+        rate_limit_consulta=10**6, rate_limit_mutacion=10**6, rate_limit_interna=10**6,
     )
 
 
