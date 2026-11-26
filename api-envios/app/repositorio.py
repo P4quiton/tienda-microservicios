@@ -111,8 +111,7 @@ class EnviosRepo:
     def despachar(self, pedido_id: UUID) -> dict | None:
         """Despacho real: preparando -> en_transito y notificación pendiente, en una sola transacción.
 
-        Función interna (el contrato aún no define qué endpoint la dispara). Idempotente: repetirla no
-        crea otra notificación. None si el pedido no tiene guía.
+        Idempotente: repetirla no crea otra notificación. None si el pedido no tiene guía.
         """
         with self._pool.connection() as conn:
             cur = conn.cursor(row_factory=dict_row)
@@ -123,12 +122,35 @@ class EnviosRepo:
             if envio is None:
                 envio = cur.execute(f"SELECT {COLUMNAS} FROM envios WHERE pedido_id = %s", (pedido_id,)).fetchone()
                 return _a_dict(envio) if envio else None
-            conn.execute(
-                "INSERT INTO notificaciones_pedido (id, pedido_id, envio_id, idempotency_key) "
-                "VALUES (%s, %s, %s, %s) ON CONFLICT (pedido_id) DO NOTHING",
-                (uuid4(), pedido_id, envio["id"], clave_estable(pedido_id)),
-            )
+            _encolar_notificacion(conn, envio)
         return _a_dict(envio)
+
+    def despachar_vencidos(self, segundos: float, lote: int = 50) -> int:
+        """Despacha las guías en `preparando` creadas hace al menos `segundos` (fecha de la BD).
+
+        FOR UPDATE SKIP LOCKED: réplicas simultáneas toman lotes distintos. Cada envío pasa a en_transito
+        y encola su notificación en la misma transacción; el estado `preparando` garantiza que no se repite.
+        """
+        with self._pool.connection() as conn:
+            cur = conn.cursor(row_factory=dict_row)
+            envios = cur.execute(
+                "SELECT id, pedido_id FROM envios WHERE estado = 'preparando' "
+                "AND creado_en <= now() - make_interval(secs => %s) "
+                "ORDER BY creado_en LIMIT %s FOR UPDATE SKIP LOCKED", (segundos, lote)
+            ).fetchall()
+            for envio in envios:
+                conn.execute("UPDATE envios SET estado = 'en_transito', despachado_en = now() WHERE id = %s",
+                             (envio["id"],))
+                _encolar_notificacion(conn, envio)
+        return len(envios)
+
+
+def _encolar_notificacion(conn, envio: dict) -> None:
+    conn.execute(
+        "INSERT INTO notificaciones_pedido (id, pedido_id, envio_id, idempotency_key) "
+        "VALUES (%s, %s, %s, %s) ON CONFLICT (pedido_id) DO NOTHING",
+        (uuid4(), envio["pedido_id"], envio["id"], clave_estable(envio["pedido_id"])),
+    )
 
 
 def _nueva_guia() -> str:

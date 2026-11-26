@@ -8,9 +8,11 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from app.config import SERVICE_NAME, Settings, load_settings
+from app.despacho import Despachador
 from app.db import MigradorEnSegundoPlano, SondaListo, create_pool
 from app.en_curso import EnCurso
 from app.errors import register_error_handlers
+from app.limites import LimitesMiddleware
 from app.notificaciones import Notificador
 from app.pedidos_client import PedidosClient
 from app.repositorio import EnviosRepo
@@ -22,7 +24,7 @@ OPENAPI_SPEC = json.loads((Path(__file__).resolve().parent.parent / "openapi.jso
 
 def create_app(
     settings: Settings, pool, pedidos=None, close_pool: bool = False,
-    migrador: MigradorEnSegundoPlano | None = None,
+    migrador: MigradorEnSegundoPlano | None = None, reloj=None,
 ) -> FastAPI:
     """`migrador=None` asume el esquema ya migrado (pruebas, migración previa explícita)."""
     esquema_listo = migrador.listo if migrador else _evento_activo()
@@ -31,12 +33,16 @@ def create_app(
     cliente_pedidos = pedidos or PedidosClient(settings)
     notificador = Notificador(pool, cliente_pedidos, settings.notificacion_intervalo, esquema_listo)
 
+    despachador = Despachador(pool, settings.despacho_segundos, settings.despacho_intervalo, esquema_listo)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         if migrador:
             migrador.iniciar()
         notificador.iniciar()  # reintenta al arrancar y luego periódicamente
+        despachador.iniciar()  # barrido periódico de guías vencidas
         yield
+        despachador.detener()
         notificador.detener()
         if migrador:
             migrador.detener()
@@ -50,8 +56,10 @@ def create_app(
     app.state.en_curso = EnCurso()
     app.state.pedidos = cliente_pedidos
     app.state.notificador = notificador
+    app.state.despachador = despachador
     app.openapi = lambda: OPENAPI_SPEC  # el contrato manda, no el esquema inferido
     register_error_handlers(app)
+    app.add_middleware(LimitesMiddleware, settings=settings, **({"reloj": reloj} if reloj else {}))
     app.include_router(router)
 
     @app.get("/health")

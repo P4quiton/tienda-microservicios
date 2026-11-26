@@ -31,6 +31,35 @@ Copiar `.env.example` a `.env` (ignorado por Git) y reemplazar cada `REPLACE_ME`
 Los dos tokens de servicio deben ser distintos. `JWT_PUBLIC_KEY_PATH` apunta a la clave pública RS256 de api-usuarios
 (la privada nunca vive aquí). Las migraciones de `migrations/*.sql` se aplican desde un hilo en segundo plano con reintentos (backoff hasta 30 s): el proceso arranca aunque la BD esté caída, `/health` responde 200 y `/ready` devuelve 503 hasta que la BD conteste y el esquema esté migrado. Varias réplicas se serializan con un advisory lock.
 
+### Despacho simulado
+
+Un hilo interno (arranca con la app, junto al worker de notificaciones) barre cada `ENVIOS_DESPACHO_INTERVALO_SEGUNDOS` (5) y
+pasa a `en_transito` las guías en `preparando` creadas hace al menos `ENVIOS_DESPACHO_SEGUNDOS` (60). El tiempo se calcula en la BD
+desde `envios.creado_en`: sobrevive a reinicios y no depende de memoria. Usa `FOR UPDATE SKIP LOCKED` (varias réplicas no despachan
+dos veces) y encola la notificación al outbox en la misma transacción; el worker existente hace el PATCH a Pedidos. Sin endpoint público.
+
+### Rate limiting y tamaño de cuerpo
+
+Middleware en memoria, **por proceso**: con varias réplicas el límite efectivo es por instancia (límite x réplicas). Ventana deslizante de 60 s.
+
+| Variable | Default | Aplica a |
+|---|---|---|
+| `RATE_LIMIT_CONSULTA_POR_MIN` | 120 | GET con JWT (clave: `sub`) |
+| `RATE_LIMIT_MUTACION_POR_MIN` | 30 | POST/PATCH/DELETE con JWT (clave: `sub`) |
+| `RATE_LIMIT_INTERNA_POR_MIN` | 300 | `X-Service-Token` válido (clave: servicio) |
+| `RATE_LIMIT_CHECKOUT_POR_MIN` | 5 | No aplica a Envíos (se lee y no se usa) |
+| `MAX_JSON_BYTES` | 262144 | Cuerpo máximo: 413 por `Content-Length` o por bytes reales (chunked) |
+
+Se autentica primero: sin credencial válida la ruta responde 401 y la petición solo consume un cubo por IP del socket (no se confía en
+`X-Forwarded-For`; tras un proxy todos compartirían IP), por lo que una inundación sin credencial acaba en 429. Un cuerpo excesivo sin
+credencial también devuelve 401. Exceso => 429 con `Retry-After` y el sobre de error del contrato; `/health` y `/ready` están exentos.
+El 413 no está declarado en `docs/api/envios.yaml` (usa el mismo sobre de error).
+
+### Idempotencia: decisión de MVP
+
+Los registros de `idempotencia` no expiran ni se borran: es una decisión consciente de MVP (crecimiento ilimitado de la tabla).
+Una política de retención queda fuera de alcance.
+
 ## Ejecución local
 
 ```bash
@@ -60,4 +89,4 @@ Sin acceso a PostgreSQL el contenedor sigue vivo (healthy) pero `/ready` da 503 
 
 ## Estructura
 
-`app/` (`routes`, `auth`, `cotizacion`, `repositorio`, `pedidos_client`, `db`, `config`, `errors`, `main`), `migrations/`, `tests/`.
+`app/` (`despacho`, `limites`, `notificaciones`, `routes`, `auth`, `cotizacion`, `repositorio`, `pedidos_client`, `db`, `config`, `errors`, `main`), `migrations/`, `tests/`.
