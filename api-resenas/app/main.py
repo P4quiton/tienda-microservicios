@@ -1,16 +1,20 @@
 from contextlib import asynccontextmanager
 import logging
+from statistics import mean
+from datetime import timezone
+from uuid import UUID
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pymongo import MongoClient
+from pymongo import DESCENDING, MongoClient
 from pymongo.errors import PyMongoError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import Settings, load_settings
 from app.database import create_mongo_client, ensure_review_indexes
 from app.errors import ApiProblem
+from app.schemas import ReviewListEnvelope, ReviewResponse
 
 logger = logging.getLogger("api-resenas")
 
@@ -111,6 +115,50 @@ def create_app(
                 content={"status": "unavailable", "service": "api-resenas"},
             )
         return {"status": "ok", "service": "api-resenas"}
+
+    @app.get(
+        "/api/resenas/producto/{producto_id}",
+        response_model=ReviewListEnvelope,
+    )
+    def list_product_reviews(producto_id: UUID, request: Request) -> ReviewListEnvelope:
+        if producto_id.version != 4:
+            raise ApiProblem(
+                status_code=422,
+                message="El identificador del producto debe ser un UUID v4.",
+                errors={"producto_id": ["Debe ser un UUID v4 válido."]},
+            )
+
+        try:
+            documents = list(
+                request.app.state.reviews.find({"producto_id": str(producto_id)}).sort(
+                    [("creado_en", DESCENDING), ("id", 1)]
+                )
+            )
+        except PyMongoError as error:
+            raise ApiProblem(
+                status_code=503,
+                message="El servicio de reseñas no está disponible.",
+                errors={},
+            ) from error
+
+        items = []
+        for document in documents:
+            created_at = document["creado_en"]
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            else:
+                created_at = created_at.astimezone(timezone.utc)
+            items.append(
+                ReviewResponse.model_validate(
+                    {**document, "creado_en": created_at}
+                )
+            )
+        promedio = round(mean(item.calificacion for item in items), 2) if items else None
+        return ReviewListEnvelope(
+            success=True,
+            message="Reseñas consultadas correctamente.",
+            data={"items": items, "promedio": promedio, "total": len(items)},
+        )
 
     return app
 
