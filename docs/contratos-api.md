@@ -1,4 +1,4 @@
-# Contratos de API v1
+# Contratos de API v1 — revisión checkout 1.1
 
 Los YAML OpenAPI 3.0.3 son la referencia normativa de integración. Los endpoints originales se conservan; se agregan confirmar/liberar inventario, consulta individual de pedido y health/ready.
 
@@ -20,10 +20,13 @@ Los YAML OpenAPI 3.0.3 son la referencia normativa de integración. Los endpoint
 | inventario | POST | /api/inventario/liberar | Identidad interna autorizada | Liberar reserva |
 | carrito | GET | /api/carrito/{usuario_id} | Titular/admin o identidad interna autorizada | Consultar carrito |
 | carrito | POST | /api/carrito/{usuario_id}/agregar | JWT del titular o admin | Agregar artículo |
-| carrito | DELETE | /api/carrito/{usuario_id}/vaciar | Identidad interna autorizada | Vaciar carrito |
+| carrito | DELETE | /api/carrito/{usuario_id}/vaciar | Solo Pedidos, sin checkout activo | Vaciar carrito |
+| carrito | POST | /api/carrito/{usuario_id}/iniciar | Solo Pedidos | Capturar snapshot versionado |
+| carrito | POST | /api/carrito/{usuario_id}/finalizar | Solo Pedidos | Retirar cantidades compradas |
+| carrito | POST | /api/carrito/{usuario_id}/liberar | Solo Pedidos | Cerrar snapshot sin retirar artículos |
 | pedidos | POST | /api/pedidos | JWT cliente o admin | Crear pedido y coordinar compra |
 | pedidos | GET | /api/pedidos/usuario/{usuario_id} | JWT del titular o admin | Historial de pedidos |
-| pedidos | PATCH | /api/pedidos/{id}/estado | Identidad interna autorizada | Actualizar estado |
+| pedidos | PATCH | /api/pedidos/{id}/estado | Solo Envíos | Actualizar pagado a enviado |
 | pedidos | GET | /api/pedidos/{id} | Titular/admin o identidad interna autorizada | Consultar pedido |
 | pagos | POST | /api/pagos/procesar | Identidad interna autorizada | Procesar pago simulado |
 | pagos | GET | /api/pagos/pedido/{pedido_id} | Titular/admin o identidad interna autorizada | Consultar comprobante |
@@ -38,3 +41,5 @@ Los YAML OpenAPI 3.0.3 son la referencia normativa de integración. Los endpoint
 - No confiar en usuario_id, precios, monto o rol enviados por navegador. Los campos no declarados se rechazan. Los esquemas no sustituyen las reglas de negocio descritas.
 - `/health`: proceso vivo, sin depender de BD; `/ready`: comprobar BD y retornar 503 si no está disponible.
 - Para listar catálogo: página 1 y límite 20 por defecto. Para envío, se adopta cantidad como unidad de cotización simulada; peso queda fuera del MVP.
+
+- Revisión 1.1: version y linea_id obligatorios en respuestas de Carrito; agregar conserva su body. Idempotency-Key obligatorio en mutaciones internas de Inventario, Carrito y PATCH de Pedidos. Ver flujo-compra.md para recuperación durable.
