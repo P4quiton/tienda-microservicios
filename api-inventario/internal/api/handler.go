@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/P4quiton/tienda-microservicios/api-inventario/internal/config"
@@ -38,6 +39,10 @@ type successEnvelope struct {
 }
 
 func NewRouter(configuration config.Config, inventoryStore *store.Postgres) *gin.Engine {
+	if os.Getenv("APP_ENV") == "production" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
 	handler := &Handler{
 		configuration: configuration,
 		store:         inventoryStore,
