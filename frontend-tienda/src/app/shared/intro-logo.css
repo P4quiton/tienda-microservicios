@@ -1,0 +1,156 @@
+:host {
+  position: fixed;
+  z-index: 9999;
+  inset: 0;
+  pointer-events: none;
+}
+
+.intro {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 1.1rem;
+  overflow: hidden;
+  color: #eafaff;
+  background:
+    radial-gradient(ellipse at 50% 78%, rgb(0 201 220 / 24%), transparent 46%),
+    radial-gradient(ellipse at 54% 18%, rgb(24 73 136 / 36%), transparent 54%),
+    linear-gradient(138deg, #041020 0%, #061b35 54%, #073943 100%);
+  opacity: 1;
+  transition: opacity 480ms cubic-bezier(.2, .7, .2, 1), visibility 480ms;
+}
+
+.intro::before,
+.intro::after {
+  position: absolute;
+  inset: -30%;
+  content: '';
+  pointer-events: none;
+}
+
+.intro::before {
+  opacity: .25;
+  background-image: radial-gradient(rgb(183 243 255 / 28%) .55px, transparent .8px);
+  background-size: 5px 5px;
+  mask-image: radial-gradient(ellipse, #000 0%, transparent 65%);
+}
+
+.intro::after {
+  opacity: .5;
+  background: conic-gradient(from 210deg at 50% 50%, transparent 0deg, rgb(49 219 231 / 12%) 76deg, transparent 148deg, rgb(97 130 255 / 13%) 228deg, transparent 310deg);
+  filter: blur(44px);
+  animation: intro-aura 4.8s ease-in-out both;
+}
+
+.intro--salida {
+  visibility: hidden;
+  opacity: 0;
+}
+
+.intro__aura {
+  position: absolute;
+  width: min(72vw, 31rem);
+  aspect-ratio: 1;
+  border: 1px solid rgb(158 240 255 / 22%);
+  border-radius: 50%;
+  box-shadow: inset 0 0 70px rgb(10 176 222 / 10%), 0 0 100px rgb(0 194 230 / 11%);
+  transform: scale(.65) rotateX(68deg);
+  animation: intro-ring 2.4s cubic-bezier(.2, .7, .2, 1) both;
+}
+
+.intro__marca {
+  position: relative;
+  z-index: 1;
+  width: clamp(9rem, 34vw, 15rem);
+  aspect-ratio: 1;
+  filter: drop-shadow(0 24px 35px rgb(0 209 255 / 24%));
+  animation: intro-flota 2.2s cubic-bezier(.2, .7, .2, 1) both;
+}
+
+.intro__canvas,
+.intro__fallback {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.intro__fallback {
+  filter: drop-shadow(0 0 18px rgb(30 210 245 / 55%));
+  transition: opacity 300ms ease;
+}
+
+.intro__canvas {
+  opacity: 0;
+  transition: opacity 350ms ease;
+}
+
+.intro__marca--3d .intro__canvas { opacity: 1; }
+.intro__marca--3d .intro__fallback { opacity: 0; }
+
+.intro__nombre {
+  position: relative;
+  z-index: 1;
+  font-size: clamp(1.35rem, 4vw, 1.85rem);
+  font-weight: 650;
+  letter-spacing: .24em;
+  padding-left: .24em;
+  text-shadow: 0 0 25px rgb(129 239 255 / 40%);
+  animation: intro-nombre 1.4s 350ms both;
+}
+
+.intro__linea {
+  position: relative;
+  z-index: 1;
+  width: 3.2rem;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, #53e9f6, #a6f4ff, transparent);
+  box-shadow: 0 0 14px rgb(61 226 255 / 70%);
+  transform-origin: center;
+  animation: intro-luz 1.5s 250ms ease-in-out both;
+}
+
+@keyframes intro-aura {
+  from { transform: rotate(-18deg) scale(.88); opacity: 0; }
+  to { transform: rotate(8deg) scale(1.06); opacity: .5; }
+}
+
+@keyframes intro-ring {
+  0% { opacity: 0; transform: scale(.65) rotateX(68deg) rotateZ(-24deg); }
+  55% { opacity: .7; }
+  100% { opacity: .36; transform: scale(1) rotateX(68deg) rotateZ(12deg); }
+}
+
+@keyframes intro-flota {
+  0% { opacity: 0; transform: translateY(12px) scale(.72); }
+  60% { opacity: 1; transform: translateY(-4px) scale(1.035); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes intro-nombre {
+  from { opacity: 0; transform: translateY(8px); letter-spacing: .4em; }
+  to { opacity: 1; transform: translateY(0); letter-spacing: .24em; }
+}
+
+@keyframes intro-luz {
+  from { opacity: 0; transform: scaleX(.15); }
+  to { opacity: 1; transform: scaleX(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro, .intro *, .intro::before, .intro::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .intro { background: #041020; }
+  .intro__aura, .intro::before, .intro::after { display: none; }
+}

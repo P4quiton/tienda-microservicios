@@ -85,6 +85,10 @@ export interface Order {
   total: string;
   estado: OrderStatus;
   creado_en: string;
+  /** Campos previstos en el siguiente contrato de Pedidos; faltan en el despliegue actual. */
+  guia?: string | null;
+  pago_id?: string | null;
+  metodo_pago?: PaymentMethod | null;
 }
 
 export interface ShippingQuote {

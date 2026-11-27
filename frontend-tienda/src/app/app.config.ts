@@ -11,6 +11,13 @@ import { apiInterceptor } from './core/api/api.interceptor';
 import { HttpTiendaDatos } from './datos/http-tienda-datos';
 import { HttpSesionUi } from './datos/http-sesion-ui';
 
+const MODO_APP_KEY = 'nebula.app.mode';
+const modoSolicitado = new URLSearchParams(location.search).get('mode');
+if (modoSolicitado === 'api' || modoSolicitado === 'mock') {
+  sessionStorage.setItem(MODO_APP_KEY, modoSolicitado);
+}
+const usarApi = (modoSolicitado ?? sessionStorage.getItem(MODO_APP_KEY)) === 'api';
+
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
@@ -22,14 +29,12 @@ export const appConfig: ApplicationConfig = {
     { provide: HttpSesionUi, useClass: HttpSesionUi },
     {
       provide: TIENDA_DATOS,
-      useFactory: (mock: MockTiendaDatos, live: HttpTiendaDatos) =>
-        new URLSearchParams(location.search).get('mode') === 'api' ? live : mock,
+      useFactory: (mock: MockTiendaDatos, live: HttpTiendaDatos) => usarApi ? live : mock,
       deps: [MockTiendaDatos, HttpTiendaDatos],
     },
     {
       provide: SESION_UI,
-      useFactory: (mock: MockSesionUi, live: HttpSesionUi) =>
-        new URLSearchParams(location.search).get('mode') === 'api' ? live : mock,
+      useFactory: (mock: MockSesionUi, live: HttpSesionUi) => usarApi ? live : mock,
       deps: [MockSesionUi, HttpSesionUi],
     },
   ]

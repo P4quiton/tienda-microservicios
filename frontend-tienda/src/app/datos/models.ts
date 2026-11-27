@@ -57,10 +57,30 @@ export interface Pedido {
   total: Monto;
   estado: EstadoPedido;
   creado_en: string;
+  /** Campos previstos en Pedidos 1.2; el endpoint actual puede omitirlos durante la integración. */
+  guia?: string | null;
+  pago_id?: string | null;
+  metodo_pago?: MetodoPago | null;
+}
+
+export interface RastreoEnvio {
+  guia: string;
+  pedido_id: string;
+  estado: EstadoEnvio;
+}
+
+export interface ComprobantePago {
+  id: string;
+  pedido_id: string;
+  monto: Monto;
+  metodo_pago: MetodoPago;
+  estado: 'aprobado' | 'rechazado';
+  creado_en: string;
 }
 
 /** Estado genérico de carga para las vistas. */
 export type Carga<T> =
   | { estado: 'cargando' }
   | { estado: 'error'; mensaje: string }
+  | { estado: 'sin-datos'; mensaje: string }
   | { estado: 'listo'; datos: T };

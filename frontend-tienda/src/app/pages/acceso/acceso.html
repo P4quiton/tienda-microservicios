@@ -1,16 +1,53 @@
 <section class="acceso">
   <aside class="marca-panel" aria-hidden="true">
-    <img src="brand/nebula-emblema.svg" alt="" width="96" height="96" />
+    <!-- Escenario de cristal: el emblema deriva en X, flota en Y y gira sobre su eje -->
+    <div class="logo-escenario" appLogoArrastrable>
+      <svg width="0" height="0" class="logo-defs">
+        <defs>
+          <linearGradient id="nb-cristal-cara" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#fff" stop-opacity=".95" />
+            <stop offset=".45" stop-color="#bfeaff" stop-opacity=".55" />
+            <stop offset="1" stop-color="#7cc8ff" stop-opacity=".3" />
+          </linearGradient>
+          <linearGradient id="nb-cristal-canto" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#e6f7ff" stop-opacity=".35" />
+            <stop offset="1" stop-color="#5aa8ff" stop-opacity=".18" />
+          </linearGradient>
+        </defs>
+      </svg>
+      <div class="logo-deriva">
+        <div class="logo-flota">
+          <div class="logo-3d">
+            <div class="logo-3d-escena">
+              @for (z of capas; track z) {
+                <svg class="logo-3d-luna" [class.cara]="z === 0 || z === capas.length - 1" [style.--z]="z" viewBox="0 0 64 64">
+                  <path d="M40 6a26 26 0 1 0 18 34 22 22 0 1 1-18-34z" />
+                </svg>
+              }
+              <svg class="logo-3d-brillo" viewBox="0 0 64 64"><path d="M30 10a22 22 0 0 0-16 26" /></svg>
+              <span class="logo-3d-orbe"></span>
+              <span class="logo-3d-orbita"><span class="logo-3d-satelite"></span></span>
+            </div>
+            <!-- Zona visible del emblema: cursor de mano para agarrarlo -->
+            <span class="logo-agarre"></span>
+          </div>
+        </div>
+        <span class="logo-3d-sombra"></span>
+      </div>
+    </div>
+    <div class="marca-texto">
     <p class="lema">Tecnología con estilo,<br />a un clic de distancia.</p>
     <ul><li>Envíos cotizados al instante</li><li>Pagos de demostración seguros</li><li>Sigue tus pedidos en un solo lugar</li></ul>
+    </div>
   </aside>
-  <div class="panel glass">
+  <div class="panel glass lente">
     <img src="brand/nebula-logo.png" alt="Nébula" width="150" height="50" class="logo" />
     <h1>{{ modo() === 'entrar' ? 'Bienvenido de nuevo' : 'Crea tu cuenta' }}</h1>
     <p class="subtitulo">{{ modo() === 'entrar' ? 'Inicia sesión para comprar y ver tus pedidos.' : 'Regístrate para comprar en Nébula.' }}</p>
     @if (volver()) { <p class="chip">Inicia sesión para continuar</p> }
 
-    <div class="pestanas" role="tablist" aria-label="Tipo de acceso">
+    <div class="pestanas deslizante" [class.registro]="modo() === 'registro'" role="tablist" aria-label="Tipo de acceso">
+      <span class="pestana-indicador" aria-hidden="true"></span>
       <button type="button" role="tab" [attr.aria-selected]="modo() === 'entrar'" [class.activa]="modo() === 'entrar'" (click)="cambiar('entrar')">Iniciar sesión</button>
       <button type="button" role="tab" [attr.aria-selected]="modo() === 'registro'" [class.activa]="modo() === 'registro'" (click)="cambiar('registro')">Registrarme</button>
     </div>
@@ -19,16 +56,16 @@
       @if (avisoRegistro()) { <p class="chip ok" role="status">{{ avisoRegistro() }}</p> }
       @if (modo() === 'registro') {
         <label class="campo">Nombre
-          <input class="input" name="nombre" autocomplete="name" [(ngModel)]="form.nombre" [attr.aria-invalid]="!!errores().nombre" aria-describedby="e-nombre" />
+          <input class="input input-cristal" name="nombre" autocomplete="name" [(ngModel)]="form.nombre" [attr.aria-invalid]="!!errores().nombre" aria-describedby="e-nombre" />
           <span id="e-nombre" class="error-campo">{{ errores().nombre }}</span>
         </label>
       }
       <label class="campo">Correo electrónico
-        <input class="input" type="email" name="correo" autocomplete="email" [(ngModel)]="form.correo" [attr.aria-invalid]="!!errores().correo" aria-describedby="e-correo" />
+        <input class="input input-cristal" type="email" name="correo" autocomplete="email" [(ngModel)]="form.correo" [attr.aria-invalid]="!!errores().correo" aria-describedby="e-correo" />
         <span id="e-correo" class="error-campo">{{ errores().correo }}</span>
       </label>
       <label class="campo">Contraseña
-        <input class="input" type="password" name="contrasena" [attr.autocomplete]="modo() === 'entrar' ? 'current-password' : 'new-password'"
+        <input class="input input-cristal" type="password" name="contrasena" [attr.autocomplete]="modo() === 'entrar' ? 'current-password' : 'new-password'"
           [(ngModel)]="form.contrasena" [attr.aria-invalid]="!!errores().contrasena" aria-describedby="e-contrasena" />
         <span id="e-contrasena" class="error-campo">{{ errores().contrasena }}</span>
       </label>

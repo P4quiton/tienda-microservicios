@@ -10,13 +10,27 @@
 .titulo-filtro { font-weight: 700; color: var(--noche); }
 .chips { display: flex; gap: .5rem; flex-wrap: wrap; }
 .filtro { font: inherit; font-weight: 600; font-size: .9rem; padding: .45rem 1rem; border-radius: 999px; border: 1px solid var(--borde); background: rgba(255,255,255,.7); color: var(--texto); cursor: pointer; transition: background .2s, border-color .2s, color .2s; }
-.filtro:hover { border-color: rgba(11,92,255,.4); }
+.filtro:not(.activo):hover { border-color: rgba(11,92,255,.4); }
 .filtro.activo { background: var(--grad-azul); border-color: transparent; color: #fff; box-shadow: 0 8px 16px -8px rgba(11,92,255,.6); }
 .orden { margin-left: auto; }
-.orden select { border-radius: 999px; padding-block: .45rem; }
 .resultado { margin: -.5rem 0 1rem; }
 .enlace { background: none; border: 0; padding: 0; font: inherit; color: var(--azul); text-decoration: underline; cursor: pointer; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1.5rem; }
 .esqueleto { height: 420px; background: linear-gradient(100deg, #fff 30%, #eef3fb 50%, #fff 70%) 0 0 / 200% 100%; animation: brillo 1.2s linear infinite; }
 @keyframes brillo { to { background-position: -200% 0; } }
 @media (max-width: 640px) { .orden { margin-left: 0; width: 100%; } }
+
+/* Chips de filtro como lentes */
+.filtro { border: 0; background: linear-gradient(-75deg, rgba(255,255,255,.45), rgba(255,255,255,.8), rgba(255,255,255,.45)); box-shadow: var(--nb-lente-sombra); transition: transform var(--nb-t) var(--nb-ease), background .2s, color .2s, box-shadow .2s; }
+.filtro:hover { transform: translateY(-1px); }
+.filtro:not(.activo):hover { background: var(--nb-hover); color: var(--nb-hover-texto); }
+.filtro.activo:hover { filter: brightness(1.08); }
+.filtro:active { transform: scale(.96); }
+.filtro.activo { box-shadow: 0 8px 16px -8px rgba(11,92,255,.6), inset 0 1px 1px rgba(255,255,255,.5), inset 0 -2px 4px rgba(4,30,110,.3); }
+.esqueleto { background: linear-gradient(100deg, rgba(255,255,255,.55) 30%, rgba(255,255,255,.95) 50%, rgba(255,255,255,.55) 70%) 0 0 / 200% 100%; }
+@media (prefers-reduced-motion: reduce) { .filtro:hover, .filtro:active { transform: none; } }
+
+/* Coherencia v2: filtros con anillo de lente y foco común */
+.filtro { min-height: 38px; box-shadow: var(--nb-lente-sombra), var(--nb-anillo); }
+.filtro.activo { box-shadow: 0 8px 16px -8px rgba(11,92,255,.6), inset 0 1px 1px rgba(255,255,255,.5), inset 0 -2px 4px rgba(4,30,110,.3); }
+.filtro:focus-visible { outline: 3px solid var(--cian); outline-offset: 2px; }
