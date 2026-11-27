@@ -46,10 +46,19 @@ final class ServiciosCompra
             throw new ApiError(503, 'Resultado de dependencia incierto');
         }
 
-        // 409 definitivo y esperado: stock insuficiente al reservar o carrito cambiado/checkout activo al iniciar.
-        if (($servicio === 'inventario' && $ruta === '/api/inventario/reservar'
-            || $servicio === 'carrito' && str_ends_with($ruta, '/iniciar')) && $respuesta->conflict()) {
-            throw new ApiError(409, 'Conflicto al preparar la compra');
+        // Solo cancelar por falta de stock cuando Inventario
+        // confirma expresamente el rechazo de la reserva.
+        if ($respuesta->conflict()) {
+            if ($servicio === 'inventario'
+                && $ruta === '/api/inventario/reservar'
+                && $respuesta->json('errors.stock.0') === 'stock_insuficiente') {
+                throw new ApiError(409, 'Inventario insuficiente');
+            }
+
+            if ($servicio === 'carrito'
+                && str_ends_with($ruta, '/iniciar')) {
+                throw new ApiError(409, 'Conflicto al preparar la compra');
+            }
         }
 
         $datos = $respuesta->json('data');

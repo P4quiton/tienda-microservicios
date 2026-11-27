@@ -164,7 +164,7 @@ class Inventario(Base):
                 return ok(self._vista(pedido)) if r["items"] == items else err(409, "Reserva existente con otro contenido")
             for it in items:
                 if self.disponibles(it["producto_id"]) < it["cantidad"]:
-                    return err(409, "Stock insuficiente", {"producto_id": it["producto_id"]})
+                    return err(409, "Stock insuficiente", {"stock": ["stock_insuficiente"]})
             for it in items:
                 self.stock[it["producto_id"]]["reservado"] += it["cantidad"]
             self.reservas[pedido] = {"items": items, "estado": "reservada"}

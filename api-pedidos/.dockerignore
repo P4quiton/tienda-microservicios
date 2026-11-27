@@ -5,3 +5,11 @@ vendor
 node_modules
 storage/logs/*
 .phpunit.cache
+.env
+.env.*
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx

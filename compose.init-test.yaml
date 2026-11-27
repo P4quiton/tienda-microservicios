@@ -5,6 +5,33 @@ services:
   mongodb:
     ports: !reset []
 
+  api-usuarios:
+    ports: !reset []
+
+  api-productos:
+    ports: !reset []
+
+  api-envios:
+    ports: !reset []
+
+  api-inventario:
+    ports: !reset []
+
+  api-carrito:
+    ports: !reset []
+
+  api-pedidos:
+    ports: !reset []
+
+  api-pagos:
+    ports: !reset []
+
+  api-resenas:
+    ports: !reset []
+
+  frontend-tienda:
+    ports: !reset []
+
 networks:
   red-tienda:
     name: red-tienda-init-test

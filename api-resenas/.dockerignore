@@ -5,3 +5,11 @@ __pycache__/
 .pytest_cache/
 .git/
 tests/
+.env.*
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+.git

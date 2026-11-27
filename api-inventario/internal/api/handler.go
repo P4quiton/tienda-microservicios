@@ -289,14 +289,28 @@ func writeValidationError(c *gin.Context, field, message string) {
 }
 
 func decodeJSON(c *gin.Context, destination any) bool {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+    if c.Request.ContentLength > 262144 {
+        writeError(c, http.StatusRequestEntityTooLarge, "Cuerpo demasiado grande.", nil)
+        return false
+    }
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 262144)
 	decoder := json.NewDecoder(c.Request.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(destination); err != nil {
+        var sizeError *http.MaxBytesError
+        if errors.As(err, &sizeError) {
+            writeError(c, http.StatusRequestEntityTooLarge, "Cuerpo demasiado grande.", nil)
+            return false
+        }
 		writeError(c, http.StatusBadRequest, "El cuerpo debe ser JSON válido y respetar el contrato.", nil)
 		return false
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+        var sizeError *http.MaxBytesError
+        if errors.As(err, &sizeError) {
+            writeError(c, http.StatusRequestEntityTooLarge, "Cuerpo demasiado grande.", nil)
+            return false
+        }
 		writeError(c, http.StatusBadRequest, "La solicitud debe contener un solo objeto JSON.", nil)
 		return false
 	}
@@ -326,7 +340,9 @@ func writeStoreError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(c, http.StatusNotFound, "Recurso no encontrado.", nil)
-	case errors.Is(err, store.ErrConflict):
+	case errors.Is(err, store.ErrInsufficientStock):
+        writeError(c, http.StatusConflict, "Inventario insuficiente.", map[string][]string{"stock": {"stock_insuficiente"}})
+    case errors.Is(err, store.ErrConflict):
 		writeError(c, http.StatusConflict, "La clave de idempotencia ya se usó con otros datos.", nil)
 	case errors.Is(err, store.ErrInProgress):
 		writeError(c, http.StatusServiceUnavailable, "La operación sigue en curso; puede reintentarse con la misma clave.", nil)

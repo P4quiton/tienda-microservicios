@@ -7,3 +7,11 @@ coverage
 .gitignore
 Dockerfile*
 README.md
+.env
+.env.*
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx

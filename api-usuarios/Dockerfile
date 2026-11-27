@@ -15,7 +15,6 @@ RUN apt-get update \
     && docker-php-ext-install -j$(nproc) \
         intl \
         pdo_pgsql \
-        opcache \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=composer-bin /usr/bin/composer /usr/local/bin/composer

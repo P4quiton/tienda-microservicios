@@ -50,11 +50,11 @@ $content = [regex]::Replace(
 
 $content = [regex]::Replace(
     $content,
-    '(?m)^USUARIOS_APP_KEY=REPLACE_APP_KEY\r?$',
+    '(?m)^([A-Z0-9_]+_APP_KEY)=REPLACE_APP_KEY\r?$',
     {
         param($match)
 
-        return "USUARIOS_APP_KEY=" + (New-LaravelAppKey)
+        return $match.Groups[1].Value + "=" + (New-LaravelAppKey)
     }
 )
 

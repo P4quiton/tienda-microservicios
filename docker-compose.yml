@@ -154,6 +154,285 @@ services:
     networks:
       - red-tienda
 
+  api-productos:
+    image: tienda/api-productos:1.0.0
+    build: ./api-productos
+    restart: unless-stopped
+    environment:
+      APP_NAME: api-productos
+      APP_ENV: production
+      APP_KEY: ${PRODUCTOS_APP_KEY:?Required}
+      APP_DEBUG: "false"
+      LOG_CHANNEL: stderr
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: db_productos
+      DB_USERNAME: usr_productos
+      DB_PASSWORD: ${POSTGRES_PRODUCTOS_PASSWORD:?Required}
+      DB_SSLMODE: disable
+      SESSION_DRIVER: array
+      CACHE_STORE: file
+      QUEUE_CONNECTION: sync
+      JWT_ISSUER: api-usuarios
+      JWT_AUDIENCE: tienda-microservicios
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
+    volumes:
+      - ./api-usuarios/storage/keys/jwt-public.pem:/run/secrets/jwt_public_key:ro
+    ports:
+      - "127.0.0.1:8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - red-tienda
+
+  api-envios:
+    image: tienda/api-envios:1.0.0
+    build: ./api-envios
+    restart: unless-stopped
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: db_envios
+      DB_USERNAME: usr_envios
+      DB_PASSWORD: ${POSTGRES_ENVIOS_PASSWORD:?Required}
+      JWT_ISSUER: api-usuarios
+      JWT_AUDIENCE: tienda-microservicios
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt-public.pem
+      SERVICE_TOKEN_PEDIDOS_ENVIOS: ${SERVICE_TOKEN_PEDIDOS_ENVIOS:?Required}
+      SERVICE_TOKEN_ENVIOS_PEDIDOS: ${SERVICE_TOKEN_ENVIOS_PEDIDOS:?Required}
+      API_PEDIDOS_URL: http://api-pedidos:8006
+      PEDIDOS_TIMEOUT_SECONDS: 3
+      NOTIFICACION_INTERVALO_SECONDS: ${NOTIFICACION_INTERVALO_SECONDS:-30}
+      ENVIOS_DESPACHO_SEGUNDOS: ${ENVIOS_DESPACHO_SEGUNDOS:-60}
+      ENVIOS_DESPACHO_INTERVALO_SEGUNDOS: ${ENVIOS_DESPACHO_INTERVALO_SEGUNDOS:-5}
+      ENVIOS_ENTREGA_SEGUNDOS: ${ENVIOS_ENTREGA_SEGUNDOS:-60}
+      RATE_LIMIT_CONSULTA_POR_MIN: 120
+      RATE_LIMIT_MUTACION_POR_MIN: 30
+      RATE_LIMIT_INTERNA_POR_MIN: 300
+      MAX_JSON_BYTES: 262144
+    volumes:
+      - ./api-usuarios/storage/keys/jwt-public.pem:/run/secrets/jwt-public.pem:ro
+    ports:
+      - "127.0.0.1:8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - red-tienda
+
+  api-inventario:
+    image: tienda/api-inventario:1.0.0
+    build: ./api-inventario
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      PORT: 8004
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: db_inventario
+      DB_USERNAME: usr_inventario
+      DB_PASSWORD: ${POSTGRES_INVENTARIO_PASSWORD:?Required}
+      DB_SSLMODE: disable
+      JWT_ISSUER: api-usuarios
+      JWT_AUDIENCE: tienda-microservicios
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
+      PEDIDOS_SERVICE_TOKEN: ${SERVICE_TOKEN_PEDIDOS_INVENTARIO:?Required}
+      PRODUCTOS_API_BASE_URL: http://api-productos:8002
+    volumes:
+      - ./api-usuarios/storage/keys/jwt-public.pem:/run/secrets/jwt_public_key:ro
+    ports:
+      - "127.0.0.1:8004:8004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - red-tienda
+
+  api-carrito:
+    image: tienda/api-carrito:1.0.0
+    build: ./api-carrito
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 8005
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: db_carrito
+      DB_USERNAME: usr_carrito
+      DB_PASSWORD: ${POSTGRES_CARRITO_PASSWORD:?Required}
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt-public.pem
+      SERVICE_TOKEN_PEDIDOS_CARRITO: ${SERVICE_TOKEN_PEDIDOS_CARRITO:?Required}
+      API_PRODUCTOS_URL: http://api-productos:8002
+      API_INVENTARIO_URL: http://api-inventario:8004
+      RATE_LIMIT_CONSULTA_POR_MIN: 120
+      RATE_LIMIT_MUTACION_POR_MIN: 30
+      RATE_LIMIT_INTERNA_POR_MIN: 300
+      MAX_JSON_BYTES: 262144
+    volumes:
+      - ./api-usuarios/storage/keys/jwt-public.pem:/run/secrets/jwt-public.pem:ro
+    ports:
+      - "127.0.0.1:8005:8005"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8005/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - red-tienda
+
+  api-pedidos:
+    image: tienda/api-pedidos:1.0.0
+    build: ./api-pedidos
+    restart: unless-stopped
+    environment:
+      APP_NAME: api-pedidos
+      APP_ENV: production
+      APP_KEY: ${PEDIDOS_APP_KEY:?Required}
+      APP_DEBUG: "false"
+      LOG_CHANNEL: stderr
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: db_pedidos
+      DB_USERNAME: usr_pedidos
+      DB_PASSWORD: ${POSTGRES_PEDIDOS_PASSWORD:?Required}
+      SESSION_DRIVER: array
+      CACHE_STORE: file
+      QUEUE_CONNECTION: sync
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt-public.pem
+      API_CARRITO_URL: http://api-carrito:8005
+      API_PRODUCTOS_URL: http://api-productos:8002
+      API_INVENTARIO_URL: http://api-inventario:8004
+      API_PAGOS_URL: http://api-pagos:8007
+      API_ENVIOS_URL: http://api-envios:8003
+      SERVICE_TOKEN_PEDIDOS_CARRITO: ${SERVICE_TOKEN_PEDIDOS_CARRITO:?Required}
+      SERVICE_TOKEN_PEDIDOS_INVENTARIO: ${SERVICE_TOKEN_PEDIDOS_INVENTARIO:?Required}
+      SERVICE_TOKEN_PEDIDOS_PAGOS: ${SERVICE_TOKEN_PEDIDOS_PAGOS:?Required}
+      SERVICE_TOKEN_PEDIDOS_ENVIOS: ${SERVICE_TOKEN_PEDIDOS_ENVIOS:?Required}
+      SERVICE_TOKEN_PAGOS_PEDIDOS: ${SERVICE_TOKEN_PAGOS_PEDIDOS:?Required}
+      SERVICE_TOKEN_ENVIOS_PEDIDOS: ${SERVICE_TOKEN_ENVIOS_PEDIDOS:?Required}
+      RATE_LIMIT_CONSULTA_POR_MIN: 120
+      RATE_LIMIT_MUTACION_POR_MIN: 30
+      RATE_LIMIT_CHECKOUT_POR_MIN: 5
+      RATE_LIMIT_INTERNA_POR_MIN: 300
+      MAX_JSON_BYTES: 262144
+    volumes:
+      - ./api-usuarios/storage/keys/jwt-public.pem:/run/secrets/jwt-public.pem:ro
+    ports:
+      - "127.0.0.1:8006:8006"
+    healthcheck:
+      test:
+        - CMD
+        - php
+        - -r
+        - "exit(@file_get_contents('http://127.0.0.1:8006/ready') === false ? 1 : 0);"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - red-tienda
+
+  api-pagos:
+    image: tienda/api-pagos:1.0.0
+    build: ./api-pagos
+    restart: unless-stopped
+    environment:
+      PORT: 8007
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: db_pagos
+      DB_USERNAME: usr_pagos
+      DB_PASSWORD: ${POSTGRES_PAGOS_PASSWORD:?Required}
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt-public.pem
+      API_PEDIDOS_URL: http://api-pedidos:8006
+      SERVICE_TOKEN_PEDIDOS_PAGOS: ${SERVICE_TOKEN_PEDIDOS_PAGOS:?Required}
+      SERVICE_TOKEN_PAGOS_PEDIDOS: ${SERVICE_TOKEN_PAGOS_PEDIDOS:?Required}
+      RATE_LIMIT_CONSULTA_POR_MIN: 120
+      RATE_LIMIT_MUTACION_POR_MIN: 30
+      RATE_LIMIT_INTERNA_POR_MIN: 300
+      MAX_JSON_BYTES: 262144
+    volumes:
+      - ./api-usuarios/storage/keys/jwt-public.pem:/run/secrets/jwt-public.pem:ro
+    ports:
+      - "127.0.0.1:8007:8007"
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -ec
+        - |
+          exec 3<>/dev/tcp/127.0.0.1/8007
+          printf 'GET /ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3
+          read -r status <&3
+          [[ "$$status" == *" 200 "* ]]
+      interval: 15s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - red-tienda
+
+  api-resenas:
+    image: tienda/api-resenas:1.0.0
+    build: ./api-resenas
+    restart: unless-stopped
+    environment:
+      PORT: 8008
+      MONGO_HOST: mongodb
+      MONGO_PORT: 27017
+      MONGO_DATABASE: db_resenas
+      MONGO_USERNAME: usr_resenas
+      MONGO_PASSWORD: ${MONGO_RESENAS_PASSWORD:?Required}
+      MONGO_AUTH_SOURCE: db_resenas
+      MONGO_TIMEOUT_MS: 3000
+      JWT_ISSUER: api-usuarios
+      JWT_AUDIENCE: tienda-microservicios
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt-public.pem
+      API_PRODUCTOS_URL: http://api-productos:8002
+    volumes:
+      - ./api-usuarios/storage/keys/jwt-public.pem:/run/secrets/jwt-public.pem:ro
+    ports:
+      - "127.0.0.1:8008:8008"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - red-tienda
+
+  frontend-tienda:
+    image: tienda/frontend-tienda:1.0.0
+    build: ./frontend-tienda
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FRONTEND_HOST_PORT:-4200}:4200"
+    depends_on:
+      - api-usuarios
+      - api-productos
+      - api-envios
+      - api-inventario
+      - api-carrito
+      - api-pedidos
+      - api-pagos
+      - api-resenas
+    networks:
+      - red-tienda
 
 networks:
   red-tienda:

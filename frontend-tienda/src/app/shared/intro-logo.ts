@@ -31,7 +31,7 @@ export class IntroLogo implements AfterViewInit, OnDestroy {
   private resizeObserver?: ResizeObserver;
 
   async ngAfterViewInit(): Promise<void> {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ?? true) {
       this.terminar(180);
       return;
     }

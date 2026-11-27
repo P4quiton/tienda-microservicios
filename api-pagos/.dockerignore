@@ -4,3 +4,10 @@ target/
 !.env.example
 *.pem
 *.key
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+.git

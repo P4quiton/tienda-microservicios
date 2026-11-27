@@ -10,3 +10,10 @@ tests/
 *.key
 Dockerfile
 .dockerignore
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+.git

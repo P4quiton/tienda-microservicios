@@ -123,7 +123,10 @@ func (p *Postgres) Reserve(ctx context.Context, idempotencyKey, identity, idempo
 		if err := tx.Commit(ctx); err != nil {
 			return Reservation{}, fmt.Errorf("confirmar respuesta idempotente: %w", err)
 		}
-		return result, nil
+		if result.Estado == "stock_insuficiente" {
+            return Reservation{}, ErrInsufficientStock
+        }
+        return result, nil
 	}
 
 	serializedItems, err := json.Marshal(items)
@@ -131,7 +134,33 @@ func (p *Postgres) Reserve(ctx context.Context, idempotencyKey, identity, idempo
 		return Reservation{}, fmt.Errorf("serializar artículos de reserva: %w", err)
 	}
 
-	var insertedOrderID string
+	if _, err := tx.Exec(ctx, "SAVEPOINT reserva_stock"); err != nil {
+return Reservation{}, err
+}
+
+rejectStock := func() (Reservation, error) {
+if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT reserva_stock"); err != nil {
+return Reservation{}, err
+}
+
+result := Reservation{
+PedidoID: orderID,
+Items: items,
+Estado: "stock_insuficiente",
+}
+
+if err := saveIdempotentResult(ctx, tx, idempotencyKey, result); err != nil {
+return Reservation{}, err
+}
+
+if err := tx.Commit(ctx); err != nil {
+return Reservation{}, err
+}
+
+return Reservation{}, ErrInsufficientStock
+}
+
+var insertedOrderID string
 	err = tx.QueryRow(ctx, `
 		INSERT INTO reservas (pedido_id, request_hash, items, estado)
 		VALUES ($1, $2, $3, 'reservada')
@@ -165,13 +194,13 @@ func (p *Postgres) Reserve(ctx context.Context, idempotencyKey, identity, idempo
 			WHERE producto_id = $1
 			FOR UPDATE`, item.ProductoID).Scan(&physical, &reserved)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Reservation{}, ErrConflict
+			return rejectStock()
 		}
 		if err != nil {
 			return Reservation{}, fmt.Errorf("bloquear existencias: %w", err)
 		}
 		if physical-reserved < item.Cantidad {
-			return Reservation{}, ErrConflict
+			return rejectStock()
 		}
 
 		if _, err := tx.Exec(ctx, `
@@ -190,7 +219,7 @@ func (p *Postgres) Reserve(ctx context.Context, idempotencyKey, identity, idempo
 		return Reservation{}, fmt.Errorf("confirmar reserva: %w", err)
 	}
 
-	return result, nil
+return result, nil
 }
 
 type lockedReservation struct {

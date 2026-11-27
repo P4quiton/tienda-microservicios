@@ -189,6 +189,11 @@ def create_app(
         request: Request,
         user: dict[str, str] = Depends(authenticated_user),
     ) -> ReviewEnvelope:
+        if not request.app.state.review_indexes_ready:
+            raise ApiProblem(
+                503,
+                "Los índices de reseñas aún no están disponibles."
+            )
         product_id = str(payload.producto_id)
         try:
             request.app.state.product_verifier.exists(product_id)

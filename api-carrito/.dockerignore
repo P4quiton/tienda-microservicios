@@ -6,3 +6,9 @@ test
 npm-debug.log*
 **/*.pem
 **/*.key
+.env
+.env.*
+**/.env
+**/.env.*
+**/*.p12
+**/*.pfx

@@ -16,7 +16,7 @@ const modoSolicitado = new URLSearchParams(location.search).get('mode');
 if (modoSolicitado === 'api' || modoSolicitado === 'mock') {
   sessionStorage.setItem(MODO_APP_KEY, modoSolicitado);
 }
-const usarApi = (modoSolicitado ?? sessionStorage.getItem(MODO_APP_KEY)) === 'api';
+const usarApi = (modoSolicitado ?? sessionStorage.getItem(MODO_APP_KEY)) !== 'mock';
 
 export const appConfig: ApplicationConfig = {
   providers: [

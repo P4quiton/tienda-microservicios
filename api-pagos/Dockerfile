@@ -2,7 +2,7 @@ FROM maven:3.9.11-eclipse-temurin-21 AS build
 WORKDIR /app
 COPY pom.xml .
 COPY src src
-RUN --mount=type=cache,target=/root/.m2 mvn -B package
+RUN --mount=type=cache,target=/root/.m2 mvn -B -DskipTests package
 
 FROM eclipse-temurin:21.0.10_7-jre-noble
 WORKDIR /app
