@@ -57,6 +57,16 @@ export interface Pedido {
   total: Monto;
   estado: EstadoPedido;
   creado_en: string;
+  /** Campos previstos en Pedidos 1.2; el endpoint actual puede omitirlos durante la integración. */
+  guia?: string | null;
+  pago_id?: string | null;
+  metodo_pago?: MetodoPago | null;
+}
+
+export interface RastreoEnvio {
+  guia: string;
+  pedido_id: string;
+  estado: EstadoEnvio;
 }
 
 export interface ComprobantePago {

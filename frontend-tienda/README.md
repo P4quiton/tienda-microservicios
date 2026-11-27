@@ -27,7 +27,7 @@ La sesión de usuario se conserva solo en memoria. Al recargar la página se deb
 
 No hay controles para quitar artículos o reducir cantidades: el contrato de Carrito solo permite consultar y agregar desde Angular. El vaciado y la coordinación de checkout son internos de Pedidos.
 
-La API de Pedidos no incluye el número de guía en su respuesta de historial/detalle. Por ello, el frontend muestra el rastreo como pendiente y no habilita la consulta hasta que se exponga una forma autorizada de obtener la guía.
+La siguiente actualización del contrato de Pedidos contempla `guia` y `pago_id` como valores nullable, además de `metodo_pago`. El frontend acepta tanto esa respuesta como la versión actual que todavía omite esos campos: un campo omitido o `null` se muestra como pendiente y no habilita rastreo. Cuando existe una guía, consulta `GET /api/envios/rastreo/{guia}`; el estado del paquete (`preparando`, `en_transito` o `entregado`) se mantiene separado del estado comercial del pedido (`pagado` o `enviado`). Los cambios del contrato y el despacho a `entregado` después de 60 segundos adicionales aún deben publicarse en `feature-mojarra-3` antes de considerarse implementados.
 
 ## Arquitectura frontend
 

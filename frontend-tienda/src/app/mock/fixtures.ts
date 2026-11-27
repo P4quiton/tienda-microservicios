@@ -1,7 +1,7 @@
 /**
  * FIXTURES DE DEMOSTRACIÓN — no son datos reales; solo los consume MockTiendaDatos.
  */
-import { ComprobantePago, Pedido, Producto, Resena } from '../datos/models';
+import { ComprobantePago, EstadoEnvio, Pedido, Producto, Resena } from '../datos/models';
 
 export const USUARIO_DEMO = '00000000-0000-4000-8000-000000000001';
 
@@ -47,18 +47,22 @@ export const RESENAS: Resena[] = [
 
 export const PEDIDOS: Pedido[] = [
   { id: uuid(10542), usuario_id: USUARIO_DEMO, estado: 'enviado', creado_en: '2026-11-15T17:20:00Z',
+    guia: 'ENVNEBULA10542', pago_id: uuid(30542), metodo_pago: 'tarjeta_simulada',
     items: [{ producto_id: uuid(101), cantidad: 1, precio_unitario: '2499.00' }, { producto_id: uuid(103), cantidad: 1, precio_unitario: '899.00' }],
     direccion: { codigo_postal: '03100', calle: 'Av. Universidad 1200', ciudad: 'Ciudad de México', estado: 'CDMX' },
     costo_envio: '129.00', total: '3527.00' },
   { id: uuid(10541), usuario_id: USUARIO_DEMO, estado: 'pagado', creado_en: '2026-11-10T12:05:00Z',
+    guia: 'ENVNEBULA10541', pago_id: uuid(30541), metodo_pago: 'tarjeta_simulada',
     items: [{ producto_id: uuid(102), cantidad: 1, precio_unitario: '1899.00' }],
     direccion: { codigo_postal: '44100', calle: 'Calle Juárez 45', ciudad: 'Guadalajara', estado: 'Jalisco' },
     costo_envio: '149.00', total: '2048.00' },
   { id: uuid(10540), usuario_id: USUARIO_DEMO, estado: 'pendiente', creado_en: '2026-11-05T09:40:00Z',
+    guia: null, pago_id: null, metodo_pago: 'tarjeta_simulada',
     items: [{ producto_id: uuid(104), cantidad: 1, precio_unitario: '1299.00' }],
     direccion: { codigo_postal: '64000', calle: 'Av. Constitución 300', ciudad: 'Monterrey', estado: 'Nuevo León' },
     costo_envio: '159.00', total: '1458.00' },
   { id: uuid(10539), usuario_id: USUARIO_DEMO, estado: 'cancelado', creado_en: '2026-10-28T19:15:00Z',
+    guia: null, pago_id: uuid(30539), metodo_pago: 'transferencia_simulada',
     items: [{ producto_id: uuid(106), cantidad: 2, precio_unitario: '649.00' }],
     direccion: { codigo_postal: '03100', calle: 'Av. Universidad 1200', ciudad: 'Ciudad de México', estado: 'CDMX' },
     costo_envio: '129.00', total: '1427.00' },
@@ -70,3 +74,27 @@ export const PAGOS_DEMO: Record<string, ComprobantePago> = {
   [uuid(10541)]: { id: uuid(30541), pedido_id: uuid(10541), monto: '2048.00', metodo_pago: 'tarjeta_simulada', estado: 'aprobado', creado_en: '2026-11-10T12:06:00Z' },
   [uuid(10539)]: { id: uuid(30539), pedido_id: uuid(10539), monto: '1427.00', metodo_pago: 'transferencia_simulada', estado: 'rechazado', creado_en: '2026-10-28T19:16:00Z' },
 };
+
+/** Rastreo ficticio para probar la consulta manual y el ciclo de 60 s + 60 s sin servicios reales. */
+export interface EnvioDemo {
+  pedido_id: string;
+  inicio: number;
+}
+
+export const ENVIOS_DEMO: Record<string, EnvioDemo> = {
+  [PEDIDOS[0].guia!]: { pedido_id: PEDIDOS[0].id, inicio: Date.now() - 180_000 },
+  [PEDIDOS[1].guia!]: { pedido_id: PEDIDOS[1].id, inicio: Date.now() - 20_000 },
+};
+
+/** La guía aparece 60 s después del pago aprobado, igual que la asignación simulada de despacho. */
+export function guiaDemo(inicio: number, ahora = Date.now()): string | null {
+  if (ahora - inicio < 60_000) return null;
+  return `ENV${inicio.toString(36).toUpperCase()}`;
+}
+
+export function estadoEnvioDemo(inicio: number, ahora = Date.now()): EstadoEnvio {
+  const transcurrido = ahora - inicio;
+  if (transcurrido < 60_000) return 'preparando';
+  if (transcurrido < 120_000) return 'en_transito';
+  return 'entregado';
+}

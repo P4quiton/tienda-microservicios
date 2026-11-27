@@ -18,15 +18,7 @@
       <button type="button" class="filtro activo" aria-pressed="true">{{ categoria() }}</button>
     }
   </div>
-  <label class="orden">
-    <span class="sr-only">Ordenar por</span>
-    <select class="input" [value]="orden()" (change)="orden.set($any($event.target).value)">
-      <option value="recomendados">Recomendados</option>
-      <option value="precio-asc">Precio: menor a mayor</option>
-      <option value="precio-desc">Precio: mayor a menor</option>
-      <option value="calificacion">Mejor calificados</option>
-    </select>
-  </label>
+  <app-menu-orden class="orden" [opciones]="opcionesOrden" [valor]="orden()" (cambio)="orden.set($any($event))" (restablecer)="limpiar(); orden.set('recomendados')" />
 </div>
 
 @if (q()) {

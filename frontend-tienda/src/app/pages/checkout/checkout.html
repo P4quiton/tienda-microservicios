@@ -10,9 +10,16 @@
   @if (r.estado === 'cancelado') {
     <section class="confirmacion tarjeta" role="alert">
       <span class="sello err" aria-hidden="true">✕</span>
-      <h1>Pago rechazado</h1>
-      <p class="subtitulo">El pago simulado fue rechazado. Tu carrito se conservó; puedes volver al checkout y elegir cómo continuar.</p>
+      <h1>Pedido cancelado</h1>
+      <p class="subtitulo">{{ mensajeCancelacion(r) }}</p>
       <p class="muted">Pedido de referencia: {{ r.id.slice(-8).toUpperCase() }}</p>
+      @if (r.pago_id || r.metodo_pago || r.guia) {
+        <dl class="datos-pedido">
+          @if (r.pago_id) { <div><dt>Pago</dt><dd>{{ r.pago_id }}</dd></div> }
+          @if (r.metodo_pago) { <div><dt>Método</dt><dd>{{ metodoPago(r.metodo_pago) }}</dd></div> }
+          @if (r.guia) { <div><dt>Guía</dt><dd>{{ r.guia }}</dd></div> }
+        </dl>
+      }
       <div class="acciones">
         <button type="button" class="btn btn-primario" (click)="reintentarPago()">Volver al checkout</button>
         <a routerLink="/mis-pedidos" class="btn btn-secundario">Ver mis pedidos</a>
@@ -23,6 +30,13 @@
       <span class="sello" aria-hidden="true">✓</span>
       <h1>¡Compra confirmada!</h1>
       <p class="subtitulo">Pedido <strong>{{ r.id.slice(-8).toUpperCase() }}</strong> por <strong>{{ r.total | mxn }}</strong>. Te avisaremos cuando se envíe.</p>
+      @if (r.pago_id || r.metodo_pago || r.guia) {
+        <dl class="datos-pedido">
+          @if (r.pago_id) { <div><dt>Pago</dt><dd>{{ r.pago_id }}</dd></div> }
+          @if (r.metodo_pago) { <div><dt>Método</dt><dd>{{ metodoPago(r.metodo_pago) }}</dd></div> }
+          @if (r.guia) { <div><dt>Guía</dt><dd>{{ r.guia }}</dd></div> }
+        </dl>
+      }
       <div class="acciones">
         <a routerLink="/mis-pedidos" class="btn btn-primario">Ver mis pedidos</a>
         <a routerLink="/catalogo" class="btn btn-secundario">Seguir comprando</a>

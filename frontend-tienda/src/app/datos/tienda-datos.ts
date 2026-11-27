@@ -1,5 +1,5 @@
 import { InjectionToken } from '@angular/core';
-import { ComprobantePago, CotizacionEnvio, Direccion, ItemCarrito, MetodoPago, Pedido, Producto, ResumenResenas } from './models';
+import { ComprobantePago, CotizacionEnvio, Direccion, ItemCarrito, MetodoPago, Pedido, Producto, RastreoEnvio, ResumenResenas } from './models';
 
 /**
  * Las vistas solo dependen de este contrato; app.config.ts selecciona el
@@ -31,6 +31,8 @@ export interface TiendaDatos {
   misPedidos(): Promise<Pedido[]>;
   /** GET /api/pagos/pedido/{pedido_id}; el endpoint valida que el pedido pertenezca al titular. */
   comprobantePago(pedidoId: string): Promise<ComprobantePago>;
+  /** GET /api/envios/rastreo/{guia}; Envíos expone el estado del paquete sin alterar estado comercial del pedido. */
+  rastrearEnvio(guia: string): Promise<RastreoEnvio>;
 }
 
 export const TIENDA_DATOS = new InjectionToken<TiendaDatos>('TIENDA_DATOS');

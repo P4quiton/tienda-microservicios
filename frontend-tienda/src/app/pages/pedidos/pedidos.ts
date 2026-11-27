@@ -1,7 +1,7 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { Carga, ComprobantePago, EstadoPedido, Pedido, Producto } from '../../datos/models';
+import { Carga, ComprobantePago, EstadoEnvio, EstadoPedido, Pedido, Producto, RastreoEnvio } from '../../datos/models';
 import { TIENDA_DATOS } from '../../datos/tienda-datos';
 import { EstadoVista } from '../../shared/estado-vista';
 import { usarImagenRespaldo } from '../../shared/imagen-respaldo';
@@ -16,6 +16,11 @@ const ESTADOS: Record<EstadoPedido, { texto: string; clase: string }> = {
 
 /** Línea de tiempo basada solo en el estado del pedido (el pedido no expone guía ni estado de envío). */
 const PROGRESO: Record<EstadoPedido, number> = { pendiente: 1, pagado: 2, enviado: 3, cancelado: 0 };
+const ETIQUETAS_ENVIO: Record<EstadoEnvio, string> = {
+  preparando: 'Preparando',
+  en_transito: 'En tránsito',
+  entregado: 'Entregado',
+};
 
 @Component({
   selector: 'app-mis-pedidos',
@@ -34,6 +39,7 @@ export class MisPedidos {
   protected productos = signal<Record<string, Producto>>({});
   protected abierto = signal<string | null>(null);
   protected comprobantes = signal<Record<string, Carga<ComprobantePago>>>({});
+  protected rastreos = signal<Record<string, Carga<RastreoEnvio>>>({});
   protected usarImagenRespaldo = usarImagenRespaldo;
 
   constructor() { this.cargar(); }
@@ -73,6 +79,29 @@ export class MisPedidos {
       }
       this.comprobantes.update((m) => ({ ...m, [pedidoId]: { estado: 'error', mensaje: (error as Error).message } }));
     }
+  }
+
+  async consultarEnvio(pedido: Pedido) {
+    const guia = pedido.guia;
+    if (!guia) return;
+    const actual = this.rastreos()[pedido.id];
+    if (actual?.estado === 'cargando') return;
+    this.rastreos.update((m) => ({ ...m, [pedido.id]: { estado: 'cargando' } }));
+    try {
+      const envio = await this.datos.rastrearEnvio(guia);
+      this.rastreos.update((m) => ({ ...m, [pedido.id]: { estado: 'listo', datos: envio } }));
+    } catch (error) {
+      this.rastreos.update((m) => ({ ...m, [pedido.id]: { estado: 'error', mensaje: (error as Error).message } }));
+    }
+  }
+
+  nombreEstadoEnvio(estado: EstadoEnvio): string { return ETIQUETAS_ENVIO[estado]; }
+
+  metodoPago(pedido: Pedido, alternativo: ComprobantePago['metodo_pago']): string {
+    const metodo = pedido.metodo_pago ?? alternativo;
+    if (metodo === 'tarjeta_simulada') return 'Tarjeta simulada';
+    if (metodo === 'transferencia_simulada') return 'Transferencia simulada';
+    return 'No disponible';
   }
 
   folio(id: string) { return 'NB-' + id.slice(-5).toUpperCase(); }

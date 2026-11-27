@@ -39,8 +39,25 @@
 
             <div class="guia">
               <span class="muted rotulo">Guía de rastreo</span>
-              <span class="pendiente">Pendiente</span>
-              <button type="button" class="btn btn-secundario" disabled aria-describedby="nota-guia">Rastrear envío</button>
+              @if (p.guia; as guia) {
+                <code class="guia-numero">{{ guia }}</code>
+                @let rastreo = rastreos()[p.id];
+                @if (!rastreo || rastreo.estado === 'cargando') {
+                  <span class="muted" role="status">{{ rastreo?.estado === 'cargando' ? 'Consultando Envíos…' : 'Estado de envío sin consultar' }}</span>
+                } @else if (rastreo.estado === 'error') {
+                  <span class="error-rastreo" role="alert">{{ rastreo.mensaje }}</span>
+                } @else if (rastreo.estado === 'listo') {
+                  <span class="estado-envio" [class.entregado]="rastreo.datos.estado === 'entregado'">{{ nombreEstadoEnvio(rastreo.datos.estado) }}</span>
+                } @else {
+                  <span class="muted">Estado de envío no disponible</span>
+                }
+                <button type="button" class="btn btn-secundario" [disabled]="rastreo?.estado === 'cargando'" (click)="consultarEnvio(p)">
+                  {{ rastreo?.estado === 'listo' ? 'Actualizar rastreo' : 'Rastrear envío' }}
+                </button>
+              } @else {
+                <span class="pendiente">Pendiente / no disponible</span>
+                <button type="button" class="btn btn-secundario" disabled aria-describedby="nota-guia">Rastrear envío</button>
+              }
             </div>
 
             <button type="button" class="expandir" [attr.aria-expanded]="abierto() === p.id" [attr.aria-controls]="'det-' + p.id"
@@ -51,6 +68,7 @@
 
           @if (abierto() === p.id) {
             <div class="detalle" [id]="'det-' + p.id">
+              <div class="tabla-cristal">
               <table>
                 <caption class="sr-only">Artículos del pedido</caption>
                 <thead><tr><th scope="col">Producto</th><th scope="col">Cantidad</th><th scope="col">Precio unitario</th></tr></thead>
@@ -60,6 +78,7 @@
                   }
                 </tbody>
               </table>
+              </div>
               <p class="muted">Envío: {{ p.costo_envio | mxn }} · Entrega en {{ p.direccion.calle }}, {{ p.direccion.ciudad }}, {{ p.direccion.estado }} C.P. {{ p.direccion.codigo_postal }}</p>
               <section class="comprobante" aria-label="Comprobante de pago" aria-live="polite">
                 <h3>Comprobante de pago</h3>
@@ -76,9 +95,9 @@
                     <button type="button" class="btn btn-secundario" (click)="cargarComprobante(p.id)">Reintentar</button>
                   } @else {
                     <dl class="datos-comprobante">
-                      <div><dt>Folio</dt><dd>{{ pago.datos.id.slice(-8).toUpperCase() }}</dd></div>
-                      <div><dt>Método</dt><dd>{{ pago.datos.metodo_pago === 'tarjeta_simulada' ? 'Tarjeta simulada' : 'Transferencia simulada' }}</dd></div>
-                      <div><dt>Resultado</dt><dd>{{ pago.datos.estado === 'aprobado' ? 'Aprobado' : 'Rechazado' }}</dd></div>
+                      <div class="id-pago"><dt>Pago</dt><dd>{{ p.pago_id ?? pago.datos.id }}</dd></div>
+                      <div><dt>Método</dt><dd>{{ metodoPago(p, pago.datos.metodo_pago) }}</dd></div>
+                      <div><dt>Resultado</dt><dd><span class="chip" [class.ok]="pago.datos.estado === 'aprobado'" [class.err]="pago.datos.estado !== 'aprobado'">{{ pago.datos.estado === 'aprobado' ? 'Aprobado' : 'Rechazado' }}</span></dd></div>
                       <div><dt>Monto</dt><dd>{{ pago.datos.monto | mxn }}</dd></div>
                       <div><dt>Fecha</dt><dd>{{ pago.datos.creado_en | date: "d 'de' MMMM 'de' y, HH:mm" : undefined : 'es-MX' }}</dd></div>
                     </dl>
@@ -94,6 +113,6 @@
         </app-estado-vista>
       }
     </ul>
-    <p id="nota-guia" class="muted nota">La guía y el rastreo aún no están disponibles: la consulta de pedidos no devuelve el número de guía.</p>
+    <p id="nota-guia" class="muted nota">El estado del paquete se consulta en Envíos cuando Pedidos proporciona una guía. El estado de entrega no cambia el estado comercial del pedido.</p>
   }
 }

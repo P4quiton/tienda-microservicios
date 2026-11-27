@@ -2,17 +2,20 @@ import { Component, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { SESION_UI } from '../../datos/sesion-ui';
+import { LogoArrastrable } from './logo-arrastrable';
 
 type Modo = 'entrar' | 'registro';
 const CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 @Component({
   selector: 'app-acceso',
-  imports: [FormsModule],
+  imports: [FormsModule, LogoArrastrable],
   templateUrl: './acceso.html',
   styleUrl: './acceso.css',
 })
 export class Acceso {
+  /** Capas en Z que dan grosor de cristal a la media luna del emblema. */
+  protected readonly capas = Array.from({ length: 12 }, (_, i) => i);
   private sesion = inject(SESION_UI);
   private router = inject(Router);
 

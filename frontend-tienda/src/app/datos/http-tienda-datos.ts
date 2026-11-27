@@ -3,7 +3,7 @@ import { firstValueFrom, Observable } from 'rxjs';
 import { StoreApiService } from '../core/api/store-api.service';
 import { SessionService } from '../core/auth/session.service';
 import { toApiProblem } from '../core/api/api-error';
-import { ComprobantePago, CotizacionEnvio, Direccion, ItemCarrito, MetodoPago, Pedido, Producto, ResumenResenas } from './models';
+import { ComprobantePago, CotizacionEnvio, Direccion, ItemCarrito, MetodoPago, Pedido, Producto, RastreoEnvio, ResumenResenas } from './models';
 import { TiendaDatos } from './tienda-datos';
 
 /**
@@ -93,6 +93,10 @@ export class HttpTiendaDatos implements TiendaDatos {
 
   async comprobantePago(pedidoId: string): Promise<ComprobantePago> {
     return this.execute(this.api.getPaymentReceipt(pedidoId));
+  }
+
+  async rastrearEnvio(guia: string): Promise<RastreoEnvio> {
+    return this.execute(this.api.trackShipment(guia));
   }
 
   /** Inicia explícitamente otro intento tras mostrar el resultado del anterior. */
