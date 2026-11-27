@@ -55,3 +55,8 @@
 .estrella { transition: transform .15s, color .15s; }
 .estrella:hover { transform: scale(1.12); }
 @media (prefers-reduced-motion: reduce) { .estrella:hover, .cantidad button:active { transform: none; } }
+
+/* Coherencia v2: stepper con mismo alto/anillo que los controles */
+.cantidad { min-height: var(--nb-control-alto); padding: 0 .2rem; box-shadow: var(--nb-lente-sombra), var(--nb-anillo); }
+.cantidad button { width: 44px; height: 40px; }
+.cantidad button:focus-visible { outline: 3px solid var(--cian); outline-offset: -3px; }

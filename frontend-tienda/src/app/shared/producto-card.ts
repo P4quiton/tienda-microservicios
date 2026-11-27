@@ -44,10 +44,14 @@ export interface ProductoResumen {
   styles: `
     .card { overflow: hidden; display: flex; flex-direction: column; height: 100%; padding: .55rem; transition: transform .25s ease, box-shadow .25s ease; }
     .card:hover { transform: translateY(-4px); box-shadow: var(--sombra-alta); }
-    .imagen { display: block; border-radius: 16px; overflow: hidden; box-shadow: inset 0 0 0 1px rgba(255,255,255,.8); }
+    .card { background: linear-gradient(180deg, rgba(255,255,255,.97), rgba(244,248,255,.92)); }
+    .imagen { position: relative; display: block; border-radius: 18px; overflow: hidden;
+      background: radial-gradient(90% 70% at 50% 35%, #eef4ff, #d9e6ff 70%, #cbdcff); box-shadow: inset 0 0 0 1px rgba(255,255,255,.85), inset 0 -10px 24px -14px rgba(11,92,255,.35); }
+    .imagen::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; box-shadow: inset 0 1px 1px rgba(255,255,255,.9), inset 0 0 0 1px rgba(120,150,220,.18); }
+    .imagen:focus-visible { outline-offset: 3px; border-radius: 18px; }
     .imagen img { width: 100%; aspect-ratio: 4/3; object-fit: cover; transition: transform .4s ease; }
     .card:hover .imagen img { transform: scale(1.04); }
-    .cuerpo { padding: .9rem .6rem .6rem; display: flex; flex-direction: column; gap: .3rem; flex: 1; align-items: flex-start; }
+    .cuerpo { padding: .9rem .5rem .35rem; display: flex; flex-direction: column; gap: .3rem; flex: 1; align-items: flex-start; }
     h3 { font-size: 1.05rem; } h3 a { color: inherit; text-decoration: none; } h3 a:hover { text-decoration: underline; }
     .resenas, .precio, .stock { margin: 0; }
     .precio { font-size: 1.35rem; font-weight: 800; letter-spacing: -.01em; color: var(--noche); }
@@ -56,6 +60,7 @@ export interface ProductoResumen {
     .punto { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
     .btn { margin-top: auto; width: 100%; }
     .stock + .btn { margin-top: .6rem; }
+    @media (prefers-reduced-motion: reduce) { .card:hover, .card:hover .imagen img { transform: none; } }
   `,
 })
 export class ProductoCard {

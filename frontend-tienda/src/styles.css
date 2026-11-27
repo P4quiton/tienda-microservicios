@@ -235,3 +235,86 @@ img { max-width: 100%; display: block; }
   .glass, .tarjeta { background: #fff; }
   .glass::before, .btn::before { display: none; }
 }
+
+/* ==========================================================================
+   Unificación Liquid Glass v2
+   Un solo lenguaje para contornos: anillo de lente + borde especular.
+   ========================================================================== */
+:root {
+  --nb-anillo: inset 0 0 0 1px rgba(120,150,220,.26);
+  --nb-control-alto: 44px;
+  --nb-vidrio-azul: linear-gradient(160deg, rgba(232,241,255,.86), rgba(214,229,255,.72) 55%, rgba(206,236,252,.7));
+  --nb-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%230b5cff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l5 5 5-5'/%3E%3C/svg%3E");
+}
+
+/* Tarjetas: borde glass uniforme (sin outline gris duplicado) */
+.tarjeta { box-shadow: var(--sombra), var(--nb-cristal-sombra), var(--nb-anillo); }
+
+/* Botones: alto mínimo táctil y deshabilitado legible (vidrio azul apagado, no gris lavado) */
+.btn { min-height: var(--nb-control-alto); }
+.btn-primario:disabled, .btn-primario[disabled] {
+  opacity: 1; filter: none; color: rgba(255,255,255,.92); text-shadow: 0 1px 1px rgba(20,40,110,.3);
+  background: linear-gradient(135deg, rgba(150,178,230,.95), rgba(128,155,215,.95));
+  box-shadow: inset 0 1px 1px rgba(255,255,255,.55), inset 0 -2px 4px rgba(30,50,120,.18);
+}
+.btn-secundario:disabled { opacity: .6; }
+
+/* Campos: mismo alto y radio de control en todas las vistas */
+.input { min-height: var(--nb-control-alto); border-radius: 14px; }
+textarea.input { min-height: 6rem; resize: vertical; }
+
+/* Select nativo: control glass con chevron propio.
+   Limitación: en navegadores sin `appearance: base-select` la lista
+   desplegable la dibuja el SO y solo acepta color/fondo de <option>. */
+select.input {
+  appearance: none; -webkit-appearance: none; cursor: pointer;
+  padding-right: 2.6rem; font-weight: 600; color: var(--noche);
+  background: var(--nb-chevron) no-repeat right 1rem center / 12px 8px,
+              linear-gradient(-75deg, rgba(255,255,255,.6), rgba(255,255,255,.92), rgba(255,255,255,.6));
+  border-color: rgba(11,92,255,.28);
+  box-shadow: var(--nb-lente-sombra), 0 6px 14px -8px rgba(20,50,120,.35);
+}
+select.input:hover { border-color: rgba(11,92,255,.5); }
+select.input:focus-visible { outline: 0; border-color: var(--azul); box-shadow: 0 0 0 4px rgba(6,191,232,.3), var(--nb-lente-sombra); }
+select.input option { color: var(--texto); background: #f3f7ff; font-weight: 500; }
+select.input option:checked { background: #dce8ff; color: var(--azul); }
+
+/* Mejora progresiva (Chromium 135+): lista desplegable de vidrio azul real */
+@supports (appearance: base-select) {
+  select.input, select.input::picker(select) { appearance: base-select; }
+  select.input { display: flex; align-items: center; gap: .5rem; }
+  select.input::picker-icon { display: none; }
+  select.input::picker(select) {
+    margin-top: 8px; padding: .4rem; border-radius: 18px;
+    border: 1px solid rgba(255,255,255,.85);
+    background: var(--nb-vidrio-azul);
+    backdrop-filter: blur(22px) saturate(1.7); -webkit-backdrop-filter: blur(22px) saturate(1.7);
+    box-shadow: var(--sombra-alta), var(--nb-cristal-sombra), var(--nb-anillo);
+    opacity: 1; transform: none;
+    transition: opacity .18s ease, transform .18s var(--nb-ease), overlay .18s allow-discrete, display .18s allow-discrete;
+  }
+  select.input:not(:open)::picker(select) { opacity: 0; transform: translateY(-4px) scale(.98); }
+  @starting-style { select.input:open::picker(select) { opacity: 0; transform: translateY(-4px) scale(.98); } }
+  select.input option {
+    background: transparent; padding: .55rem .9rem; border-radius: 12px; gap: .5rem;
+    font-weight: 500; color: var(--texto); transition: background .15s, color .15s;
+  }
+  select.input option::checkmark { content: '✓'; color: var(--azul); font-weight: 700; order: 1; margin-left: auto; }
+  select.input option:hover, select.input option:focus-visible {
+    background: rgba(255,255,255,.75); color: var(--azul); outline: 0;
+    box-shadow: inset 0 0 0 1px rgba(11,92,255,.22);
+  }
+  select.input option:checked {
+    background: var(--grad-azul); color: #fff;
+    box-shadow: inset 0 1px 1px rgba(255,255,255,.4), 0 6px 14px -8px rgba(11,92,255,.7);
+  }
+  select.input option:checked::checkmark { color: #fff; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  select.input::picker(select) { transition: none; }
+}
+@media (prefers-contrast: more) {
+  select.input, .input { border-color: var(--texto); }
+  .btn-primario:disabled { background: #8a9bc4; color: #fff; }
+}

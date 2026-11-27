@@ -1,6 +1,6 @@
 # Nébula · frontend-tienda
 
-Tienda web en Angular 21 con catálogo, detalle, checkout, historial y acceso. La interfaz usa el sistema visual Liquid Glass de Nébula y consume los contratos REST mediante rutas relativas `/api/...`.
+Tienda web en Angular 21 con catálogo, detalle, checkout, historial y acceso. La interfaz usa el sistema visual Liquid Glass de Nébula y consume los contratos REST mediante rutas relativas `/api/...`. Al abrir o recargar la aplicación presenta una breve animación de entrada del emblema extruido en Three.js; respeta `prefers-reduced-motion` y ofrece el SVG local como respaldo cuando WebGL no está disponible.
 
 ## Desarrollo local
 
@@ -36,6 +36,7 @@ La API de Pedidos no incluye el número de guía en su respuesta de historial/de
 - `src/app/mock/`: fixtures y proveedores simulados, aislados de la capa HTTP.
 - `src/app/pages/`: catálogo, detalle, acceso, checkout e historial.
 - `src/app/shared/`: estados de vista, estrellas, tarjetas, imágenes de respaldo y formato MXN.
+- `src/app/shared/intro-logo.*`: intro 3D autocontenida; Three.js y SVGLoader se cargan bajo demanda y liberan recursos al terminar.
 
 ## Comandos
 

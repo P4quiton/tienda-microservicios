@@ -50,3 +50,8 @@
 .linea-tiempo .hecho .punto { box-shadow: inset 0 0 0 4px #fff, 0 0 0 3px rgba(15,138,75,.15); }
 .detalle { border-top-color: rgba(120,150,220,.2); }
 @media (prefers-reduced-motion: reduce) { .expandir:active { transform: none; } }
+
+/* Coherencia v2: hit area 44px y estado abierto en vidrio azul */
+.expandir { width: 44px; height: 44px; box-shadow: var(--nb-lente-sombra), var(--nb-anillo); transition: background .2s, transform .15s; }
+.expandir[aria-expanded='true'] { background: var(--nb-vidrio-azul); color: var(--azul); }
+.expandir:focus-visible { outline: 3px solid var(--cian); outline-offset: 2px; }

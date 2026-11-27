@@ -22,7 +22,7 @@
 .error-campo { margin: .4rem 0 0; } .error-campo:empty { display: none; }
 .direccion { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: .8rem; margin-top: 1rem; }
 .metodos { display: grid; gap: .6rem; }
-.metodo { transition: border-color .2s, background .2s; display: flex; gap: .8rem; align-items: flex-start; padding: .8rem 1rem; border: 1px solid var(--borde); border-radius: 14px; cursor: pointer; background: #fff; }
+.metodo { transition: background .2s; display: flex; gap: .8rem; align-items: flex-start; padding: .8rem 1rem; border: 1px solid var(--borde); border-radius: 14px; cursor: pointer; background: #fff; }
 .metodo > span { display: grid; }
 .metodo.sel { border-color: var(--azul); background: var(--info-bg); }
 .metodo input { margin-top: .3rem; accent-color: var(--azul); }
@@ -47,7 +47,7 @@
 
 .pasos { box-shadow: var(--sombra), var(--nb-lente-sombra); border: 0; }
 .num { box-shadow: var(--nb-lente-sombra); border-color: rgba(120,150,220,.3); }
-.metodo { border: 0; background: linear-gradient(-75deg, rgba(255,255,255,.55), rgba(255,255,255,.9), rgba(255,255,255,.55)); box-shadow: var(--nb-lente-sombra); }
-.metodo.sel { background: linear-gradient(-75deg, rgba(220,232,255,.8), rgba(240,246,255,.95), rgba(220,232,255,.8)); box-shadow: inset 0 0 0 1.5px var(--azul), var(--nb-lente-sombra); }
+.metodo { border: 0; border-radius: 16px; background: linear-gradient(-75deg, rgba(255,255,255,.55), rgba(255,255,255,.9), rgba(255,255,255,.55)); box-shadow: var(--nb-lente-sombra), var(--nb-anillo); }
+.metodo.sel { background: linear-gradient(-75deg, rgba(220,232,255,.8), rgba(240,246,255,.95), rgba(220,232,255,.8)); box-shadow: inset 0 0 0 1.5px var(--azul); }
 .metodo:focus-within { outline: 3px solid var(--cian); outline-offset: 2px; }
 .sello { box-shadow: inset 0 2px 2px rgba(255,255,255,.45), inset 0 -3px 6px rgba(0,0,0,.2), 0 12px 24px -10px currentColor; }
