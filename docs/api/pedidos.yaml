@@ -88,6 +88,23 @@ paths:
                         - pagado
                         - enviado
                         - cancelado
+                      guia:
+                        type: string
+                        nullable: true
+                        description: Guía de envío, nula hasta su generación.
+                        example: GUIA-FICTICIA
+                      pago_id:
+                        type: string
+                        format: uuid
+                        nullable: true
+                        description: Identificador del pago definitivo registrado, aprobado o rechazado.
+                        example: 9b53af83-166f-4e78-ae73-352da829b6e4
+                      metodo_pago: &metodo_pago
+                        type: string
+                        enum:
+                        - tarjeta_simulada
+                        - transferencia_simulada
+                        example: tarjeta_simulada
                       creado_en:
                         type: string
                         format: date-time
@@ -99,6 +116,9 @@ paths:
                     - costo_envio
                     - total
                     - estado
+                    - guia
+                    - pago_id
+                    - metodo_pago
                     - creado_en
                     additionalProperties: false
                 required:
@@ -173,11 +193,7 @@ paths:
               type: object
               properties:
                 direccion: *id003
-                metodo_pago:
-                  type: string
-                  enum:
-                  - tarjeta_simulada
-                  - transferencia_simulada
+                metodo_pago: *metodo_pago
               required:
               - direccion
               - metodo_pago

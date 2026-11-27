@@ -1,0 +1,128 @@
+# QA "romper y arreglar" de api-envios
+
+Fecha: 2026-11-26. Alcance: solo `mojarra3/api-envios`. Sin cambios a `docs/api/*.yaml` ni a otros servicios.
+Método: barrido hostil con scripts desechables (en proceso, TestClient + PostgreSQL 17 real), luego prueba de
+regresión roja, arreglo y verde.
+
+## Resumen
+
+| | Antes | Después |
+|---|---|---|
+| Pruebas | 58 pasan (el encargo decía 50) | 68 pasan (10 nuevas en `tests/test_hostil.py`) |
+| Bugs | 5 hallados | 5 arreglados |
+
+## Hallazgos
+
+| # | Severidad | Hallazgo | Arreglo |
+|---|---|---|---|
+| 1 | Alta | Con la BD **colgada** (no caída; p. ej. `docker pause`) las rutas sync llenan el threadpool y `/health` (sync) deja de responder: la sonda de vida falla; `/ready` puede no volver nunca. | `/health` ahora es `async` y sin I/O. `/ready` usa `SondaListo` (`app/db.py`): hilo propio, tope 3 s, y si el intento previo sigue colgado responde 503 sin apilar hilos. |
+| 2 | Media | `NUL` (`\u0000`) o sustituto UTF-16 suelto (`\ud800`) en `calle`/`ciudad`/`estado` provocaba 500 al insertar en PostgreSQL. | Validador `_almacenable` en `app/schemas.py`: 422. |
+| 3 | Media | `GET /rastreo/a%00b` devolvía 500. | `buscar_por_guia` devuelve `None` (404) si la guía contiene NUL. |
+| 4 | Media | `cantidad` grande (p. ej. 10^9) devolvía 200 con `costo_envio` de 11+ dígitos, violando el patrón `^\d{1,10}\.\d{2}$` del contrato. | `cotizar` lanza `CantidadFueraDeRango` si el importe supera 9999999999.99; la ruta responde 422 con error en `cantidad`. |
+| 5 | Baja | Entero de miles de dígitos en el JSON: 400 con mensaje genérico "Error". | El 400 de Starlette se mapea a "JSON inválido". |
+
+Cambio a una prueba existente: `test_sin_limites_propios_mas_estrictos_que_el_contrato` fijaba `cantidad=10**12 -> 200`, que
+contradice el patrón de importe del contrato (hallazgo 4). Se cambió a `10**6`. README actualizado en las dos reglas afectadas.
+
+## Atacado sin hallazgos
+
+- JSON malformado, UTF-8 inválido, `NaN`, cuerpo array/null, campos extra, `bool` como entero, CP con `\n` o dígitos Unicode: 400/422.
+- Idempotency-Key no v4 -> 422; mayúsculas normalizadas.
+- JWT: `alg=none`, HS256, clave ajena, expirado, `iss`/`aud`/`role`/`sub` erróneos, `exp` enorme, token de 1 MB, cabeceras no ASCII: 401.
+- X-Service-Token vacío, equivocado, no ASCII o del otro par (Envíos->Pedidos): 401; un JWT de usuario en `/generar`: 403.
+- Titularidad: cliente A sobre guía de B: 403 (pruebas existentes).
+- Concurrencia (80 solicitudes en 40 hilos, misma pedido, mitad con la misma clave): 1 sola guía, 1 fila en `envios`; 200 solicitudes con claves distintas sobre 20 pedidos: 20 filas. Las repetidas en curso reciben 409 (contrato).
+- Migraciones: 8 `migrate()` en paralelo y repetidas: una sola fila en `schema_migrations`, sin error.
+- BD caída: `/health` 200, `/ready` 503, rutas de negocio 503 (pruebas existentes); BD pausada y reanudada: `/ready` 503 en 3.0 s y luego 200.
+- Inyección SQL en `guia` y `calle`: consultas parametrizadas; se guarda literal; la tabla sigue íntegra.
+
+## Comandos y salida
+
+```
+docker run --rm -d --name mojarra-pg-envios -p 55433:5432 --tmpfs /var/lib/postgresql/data \
+  -e POSTGRES_PASSWORD=<aleatoria local> -e POSTGRES_DB=db_envios postgres:17
+export TEST_DATABASE_URL='host=127.0.0.1 port=55433 dbname=db_envios user=postgres password=<local>'
+/mnt/disco/desarrollo-local/tienda/envios/api-envios/.venv/bin/python -m pytest -q -p no:cacheprovider
+```
+
+- Línea base: `58 passed, 1 warning in 7.06s`
+- Regresiones en rojo (antes de arreglar): `9 failed` en `tests/test_hostil.py` y, tras añadir la de BD colgada, `1 failed` (health sin respuesta en 3 s).
+- Final: `68 passed, 1 warning in 12.44s`
+- Verificación manual con `docker pause` del contenedor propio: `health 200 ready 503 3.0s`; tras `unpause`, `ready 200`.
+
+## Pendientes y decisiones abiertas
+
+1. **Rutas de negocio con BD colgada**: siguen esperando (psycopg no tiene tiempo límite de consulta del lado cliente si el servidor
+   está congelado). Con `/health` ya aislado el proceso no se reinicia por esto, pero las peticiones de negocio se acumulan.
+   Mitigar con timeouts del proxy/Kubernetes o un `statement_timeout`/cancelación; requiere decisión.
+2. **Tamaño de cuerpo**: una `calle` de 3 MB se acepta (201). El contrato no declara longitudes ni 413; limitar el tamaño lo ve mejor
+   el proxy (`client_max_body_size` en Nginx). Decisión del coordinador.
+3. **Vida del JWT**: `docs/seguridad.md` dice exp de 60 min, pero Envíos acepta cualquier `exp` futuro firmado correctamente. Rechazar
+   `exp - iat > 3600` es defensa en profundidad; no se aplicó para no arriesgar tokens reales de api-usuarios (margen de reloj).
+4. `POST /api/envios/cotizar/` (barra final) responde 307 redirect; cosmético.
+5. **NO VERIFICADO**: build de imagen Docker (prohibido por el encargo), ejecución con uvicorn real y Pedidos real, y el rate limit 429
+   del contrato (no implementado en este servicio).
+6. Nota de entorno: el venv indicado (`envios/api-envios/.venv`) se usó sin modificarlo; el scratchpad es compartido y otro agente
+   sobrescribió un archivo temporal mío (contraseña), sin otro efecto.
+
+## Contrato 1.1.0
+
+Cambios: `openapi.json` regenerado desde `upstream/docs/checkout-contracts:docs/api/envios.yaml` (v1.1.0); migración `002_contrato_1_1_0.sql`;
+`app/notificaciones.py` (outbox + trabajador); `PedidosClient.marcar_enviado`; `EnviosRepo` reescrito alrededor de un solo camino bloqueado.
+
+- **/generar**: antes el resultado guardado era solo una referencia al envío (devolvía el estado actual, no el original) y una clave nueva
+  con el mismo pedido consultaba antes a Pedidos (503 si caído, incluso con payload incompatible que debía ser 409). Ahora `resultado` JSONB
+  se persiste con la clave y el efecto en una transacción, `pedido_id` queda atado a cada clave, y repetición/payload incompatible se
+  resuelven sin Pedidos. Efecto nunca repetido: `UNIQUE(pedido_id)` en `envios` + advisory locks por clave y por pedido.
+- **Estado inicial** `preparando`; generar no notifica. **Despacho real** = `EnviosRepo.despachar` (interna). Notificación: outbox en PostgreSQL,
+  una por pedido, creada atómicamente con el paso a `en_transito`; PATCH con token propio e Idempotency-Key v4 determinista por pedido;
+  reintento al arrancar y periódico, backoff exponencial, lease contra trabajadores simultáneos; sobrevive a reinicios (prueba con un
+  `Notificador` nuevo sobre la misma BD). Probado también que la migración rellena datos preexistentes.
+- **Pruebas** (PG17 temporal en 55443): línea base `67 passed, 1 failed` (`test_openapi_json_es_el_contrato_valido`: el `openapi.json` de
+  1.0.0 difería del YAML 1.1.0 ya presente en `../docs`). Regresiones nuevas (`tests/test_despacho_outbox.py`, 19) en rojo: error de
+  colección (módulos/tablas inexistentes). Final: `87 passed, 1 warning`.
+- **Pendientes**: (1) el contrato no define el disparador del despacho real: no se inventó endpoint; falta decidir (p. ej. endpoint de
+  transportista/admin o evento) y llamar a `despachar`. (2) Un 409/4xx persistente de Pedidos se reintenta indefinidamente (tope 15 min)
+  guardando `ultimo_error`; no hay alerta ni estado de revisión manual. (3) NO VERIFICADO contra un Pedidos real (cliente probado con httpx simulado).
+  (4) La clave estable es UUID v4 por hash, no uuid5, porque `contratos-api.md` exige v4.
+
+## Decisiones del equipo (despacho, rate limiting)
+
+Cambios: `app/despacho.py` (Despachador), `EnviosRepo.despachar_vencidos` (+ helper compartido con `despachar`), `app/limites.py`
+(middleware de rate limit y tamaño), campos nuevos en `Settings`/`load_settings`, arranque del despachador en el lifespan, README y `.env.example`.
+
+- **Despacho (A)**: barrido periódico (`ENVIOS_DESPACHO_SEGUNDOS`=60, `ENVIOS_DESPACHO_INTERVALO_SEGUNDOS`=5) sobre `envios.creado_en` con
+  `FOR UPDATE SKIP LOCKED`; paso a `en_transito` y fila de outbox en una transacción; el Notificador existente entrega el PATCH.
+  Sin endpoint público. Idempotente por la condición `estado = 'preparando'`.
+- **Rate limit y cuerpo (B)**: ventana deslizante por proceso. Decisión de interpretación: sin credencial válida la ruta da 401 y solo
+  consume un cubo por IP (una inundación sin credencial termina en 429); un cuerpo excesivo sin credencial da 401, con credencial 413.
+  `RATE_LIMIT_CHECKOUT_POR_MIN` se lee pero no se usa. 413 no figura en el contrato de Envíos.
+- **Idempotencia (C)**: sin expiración ni borrado; documentado en README como decisión de MVP.
+- **Pruebas** (PG17 temporal en 55453, rol `usr_envios` sin CREATEDB): línea base `87 passed`. Rojo: `tests/test_despacho_automatico.py` y
+  `tests/test_limites.py` fallaban en colección (módulo `app.despacho` y campos/`reloj` inexistentes). Final: `105 passed, 1 warning`
+  (87 previas + 6 de despacho + 12 de límites).
+- **Ajustes a pruebas previas**: solo `tests/conftest.py`: la fixture `settings` fija límites altos (10**6) para no chocar con el rate limit.
+  Ninguna prueba previa dependía de límites de tamaño (la más grande, 5000 dígitos y `calle` de 500 caracteres, queda muy por debajo de 262144).
+  El test de despacho por lifespan corre con `TestClient` como context manager; el resto de suites no arranca hilos (sin cambios).
+- **NO VERIFICADO**: varias réplicas reales (la concurrencia se probó con 4 hilos sobre la misma BD, no con procesos separados);
+  Content-Length mentiroso con servidor real (uvicorn/h11 ya acota el cuerpo al Content-Length declarado, no se probó); comportamiento tras
+  proxy (IP del socket); carga/rendimiento del middleware; ejecución con uvicorn real y Pedidos real; build Docker (prohibido).
+  El límite en memoria no se comparte entre réplicas.
+
+## Actualizacion: despacho automatico y entrega automatica
+
+Las notas previas sobre la «decisión pendiente» del disparador quedaron superadas por el despacho periódico de
+`app/despacho.py`. El despacho fija la fecha de PostgreSQL junto con el cambio a `en_transito` y el registro del outbox
+en una sola transacción. Si ya existe una fecha de despacho, la conserva. La migración 003 inicia el plazo de las guías
+en tránsito sin fecha al momento de migrar.
+
+El mismo hilo entrega las guías vencidas según `ENVIOS_ENTREGA_SEGUNDOS` (entero positivo, 60 por defecto).
+La entrega actualiza el estado que devuelve rastreo. El outbox de despacho sigue siendo el único aviso a Pedidos,
+cuyo estado permanece `enviado`.
+
+- **Verificado.** PostgreSQL 17.12 en un contenedor efímero con el rol `usr_envios` sin `CREATEDB`.
+  Antes, 105 pruebas aprobadas. Después, 123 aprobadas. Ambas ejecuciones emitieron la misma advertencia de
+  deprecación de Starlette TestClient. Se comprobaron la migración concurrente y repetida, el plazo, la concurrencia,
+  el reinicio de la app, la recuperación del hilo tras un fallo, la atomicidad del despacho, el outbox y el rastreo HTTP.
+  El YAML parsea y coincide con el JSON servido. Solo cambiaron las descripciones de generar y rastrear.
+- **NO VERIFICADO.** Despliegue con réplicas en procesos separados, Pedidos y Angular reales, y build de la imagen.
