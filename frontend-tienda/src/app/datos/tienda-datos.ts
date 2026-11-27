@@ -1,10 +1,9 @@
 import { InjectionToken } from '@angular/core';
-import { CotizacionEnvio, Direccion, ItemCarrito, MetodoPago, Pedido, Producto, ResumenResenas } from './models';
+import { ComprobantePago, CotizacionEnvio, Direccion, ItemCarrito, MetodoPago, Pedido, Producto, RastreoEnvio, ResumenResenas } from './models';
 
 /**
- * PUNTO DE INTEGRACIÓN. Las vistas solo dependen de este contrato.
- * Hoy se provee MockTiendaDatos (src/app/mock); la capa HTTP/auth real debe
- * implementar esta misma interfaz y registrarse en app.config.ts.
+ * Las vistas solo dependen de este contrato; app.config.ts selecciona el
+ * proveedor simulado o el adaptador HTTP según el modo de ejecución.
  * Cada método corresponde a un endpoint de docs/api (indicado en el comentario).
  */
 export interface TiendaDatos {
@@ -30,6 +29,10 @@ export interface TiendaDatos {
   nuevoIntentoCheckout(): void;
   /** GET /api/pedidos/usuario/{usuario_id} */
   misPedidos(): Promise<Pedido[]>;
+  /** GET /api/pagos/pedido/{pedido_id}; el endpoint valida que el pedido pertenezca al titular. */
+  comprobantePago(pedidoId: string): Promise<ComprobantePago>;
+  /** GET /api/envios/rastreo/{guia}; Envíos expone el estado del paquete sin alterar estado comercial del pedido. */
+  rastrearEnvio(guia: string): Promise<RastreoEnvio>;
 }
 
 export const TIENDA_DATOS = new InjectionToken<TiendaDatos>('TIENDA_DATOS');

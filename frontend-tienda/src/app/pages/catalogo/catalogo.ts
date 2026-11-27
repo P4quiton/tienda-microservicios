@@ -4,6 +4,7 @@ import { CarritoStore } from '../../datos/carrito.store';
 import { Carga } from '../../datos/models';
 import { TIENDA_DATOS } from '../../datos/tienda-datos';
 import { EstadoVista } from '../../shared/estado-vista';
+import { MenuOrden, OpcionOrden } from '../../shared/menu-orden';
 import { ProductoCard, ProductoResumen } from '../../shared/producto-card';
 
 type Orden = 'recomendados' | 'precio-asc' | 'precio-desc' | 'calificacion';
@@ -11,7 +12,7 @@ type Orden = 'recomendados' | 'precio-asc' | 'precio-desc' | 'calificacion';
 
 @Component({
   selector: 'app-catalogo',
-  imports: [ProductoCard, EstadoVista],
+  imports: [MenuOrden, ProductoCard, EstadoVista],
   templateUrl: './catalogo.html',
   styleUrl: './catalogo.css',
 })
@@ -27,6 +28,12 @@ export class Catalogo {
   /** categoria es texto libre en el contrato: las chips se derivan del catálogo sin filtrar. */
   protected categorias = signal<string[]>([]);
   protected orden = signal<Orden>('recomendados');
+  protected opcionesOrden: OpcionOrden[] = [
+    { valor: 'recomendados', texto: 'Recomendados', icono: 'destacado' },
+    { valor: 'precio-asc', texto: 'Precio: menor a mayor', icono: 'asc' },
+    { valor: 'precio-desc', texto: 'Precio: mayor a menor', icono: 'desc' },
+    { valor: 'calificacion', texto: 'Mejor calificados', icono: 'estrella' },
+  ];
   protected estado = signal<Carga<ProductoResumen[]>>({ estado: 'cargando' });
   protected agregando = signal<string | null>(null);
   protected aviso = signal('');

@@ -44,6 +44,18 @@ export class Checkout {
   });
   protected paso = computed(() => this.resultado() ? 4 : this.cotizacion() ? 3 : this.lineas().length ? 2 : 1);
 
+  protected mensajeCancelacion(pedido: Pedido): string {
+    if (pedido.pago_id) return 'El pago simulado fue rechazado. Tu carrito se conservó; puedes volver al checkout y elegir cómo continuar.';
+    if (pedido.pago_id === null) return 'El pedido se canceló y no se registró un pago. Tu carrito se conservó; revisa el inventario o los datos de compra antes de intentarlo de nuevo.';
+    return 'El pedido se canceló. Tu carrito se conservó; revisa el detalle del pedido para conocer el motivo antes de intentarlo de nuevo.';
+  }
+
+  protected metodoPago(metodo: Pedido['metodo_pago']): string {
+    if (metodo === 'tarjeta_simulada') return 'Tarjeta simulada';
+    if (metodo === 'transferencia_simulada') return 'Transferencia simulada';
+    return 'No disponible';
+  }
+
   constructor() {
     // Una cotización deja de ser válida si cambia el carrito.
     effect(() => { this.carrito.unidades(); this.cotizacion.set(null); });

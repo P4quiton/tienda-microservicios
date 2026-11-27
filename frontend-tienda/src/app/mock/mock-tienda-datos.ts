@@ -4,9 +4,9 @@
  */
 import { Injectable } from '@angular/core';
 import { aCentavos, deCentavos } from '../datos/dinero';
-import { CotizacionEnvio, Direccion, ItemCarrito, MetodoPago, Pedido, Producto, ResumenResenas } from '../datos/models';
+import { ComprobantePago, CotizacionEnvio, Direccion, ItemCarrito, MetodoPago, Pedido, Producto, RastreoEnvio, ResumenResenas } from '../datos/models';
 import { TiendaDatos } from '../datos/tienda-datos';
-import { INVENTARIO, PEDIDOS, PRODUCTOS, RESENAS, USUARIO_DEMO } from './fixtures';
+import { ENVIOS_DEMO, estadoEnvioDemo, guiaDemo, INVENTARIO, PAGOS_DEMO, PEDIDOS, PRODUCTOS, RESENAS, USUARIO_DEMO } from './fixtures';
 
 const modo = () => new URLSearchParams(location.search).get('mock');
 const normalizar = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
@@ -16,6 +16,8 @@ export class MockTiendaDatos implements TiendaDatos {
   private items: ItemCarrito[] = [{ producto_id: PRODUCTOS[0].id, cantidad: 1 }, { producto_id: PRODUCTOS[2].id, cantidad: 1 }];
   private resenasExtra = [...RESENAS];
   private pedidos = [...PEDIDOS];
+  private comprobantes = new Map(Object.entries(PAGOS_DEMO));
+  private envios = new Map(Object.entries(ENVIOS_DEMO));
 
   private async latencia<T>(valor: () => T, ms = 450): Promise<T> {
     await new Promise((r) => setTimeout(r, ms));
@@ -79,9 +81,16 @@ export class MockTiendaDatos implements TiendaDatos {
       // Acuerdo de pagos simulados: tarjeta aprueba, transferencia rechaza.
       // Supuesto UI: un rechazo llega como pedido 'cancelado' y el carrito se conserva.
       const aprobado = metodo === 'tarjeta_simulada';
-      const pedido: Pedido = { id: crypto.randomUUID(), usuario_id: USUARIO_DEMO, items, direccion, costo_envio,
-        total: deCentavos(subtotal + aCentavos(costo_envio)), estado: aprobado ? 'pagado' : 'cancelado', creado_en: new Date().toISOString() };
+      const id = crypto.randomUUID();
+      const pagoId = crypto.randomUUID();
+      const creado = new Date().toISOString();
+      const total = deCentavos(subtotal + aCentavos(costo_envio));
+      const pedido: Pedido = { id, usuario_id: USUARIO_DEMO, items, direccion, costo_envio, total,
+        estado: aprobado ? 'pagado' : 'cancelado', creado_en: creado, guia: null, pago_id: pagoId, metodo_pago: metodo };
       this.pedidos.unshift(pedido);
+      this.comprobantes.set(id, { id: pagoId, pedido_id: id, monto: total, metodo_pago: metodo,
+        estado: aprobado ? 'aprobado' : 'rechazado', creado_en: creado });
+      if (aprobado) this.envios.set('', { pedido_id: id, inicio: Date.now() });
       if (aprobado) this.items = [];
       return pedido;
     }, 900);
@@ -89,5 +98,33 @@ export class MockTiendaDatos implements TiendaDatos {
 
   nuevoIntentoCheckout(): void { /* Los mocks no necesitan clave de idempotencia. */ }
 
-  misPedidos() { return this.latencia(() => modo() === 'vacio' ? [] : [...this.pedidos]); }
+  misPedidos() { return this.latencia(() => { this.sincronizarGuias(); return modo() === 'vacio' ? [] : [...this.pedidos]; }); }
+
+  comprobantePago(pedidoId: string): Promise<ComprobantePago> {
+    return this.latencia(() => {
+      const receipt = this.comprobantes.get(pedidoId);
+      if (!receipt) throw new Error('El pedido aún no tiene un comprobante disponible.');
+      return receipt;
+    }, 300);
+  }
+
+  rastrearEnvio(guia: string): Promise<RastreoEnvio> {
+    return this.latencia(() => {
+      const envio = this.envios.get(guia) ?? [...this.envios.values()].find((item) => guiaDemo(item.inicio) === guia);
+      if (!envio) throw new Error('Guía no encontrada.');
+      return { guia, pedido_id: envio.pedido_id, estado: estadoEnvioDemo(envio.inicio) };
+    }, 300);
+  }
+
+  private sincronizarGuias(): void {
+    this.envios.forEach((envio, clave) => {
+      if (clave) return;
+      const guia = guiaDemo(envio.inicio);
+      if (!guia) return;
+      const pedido = this.pedidos.find((p) => p.id === envio.pedido_id);
+      if (pedido) pedido.guia = guia;
+      this.envios.delete(clave);
+      this.envios.set(guia, envio);
+    });
+  }
 }

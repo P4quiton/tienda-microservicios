@@ -9,9 +9,8 @@ export interface UsuarioUi {
 }
 
 /**
- * PUNTO DE INTEGRACIÓN de acceso. La UI solo usa esta interfaz.
- * Hoy: MockSesionUi. Integración: adaptar AuthService/SessionService de core/
- * (POST /api/usuarios/login y /api/usuarios/registro; JWT en memoria).
+ * La UI solo usa esta interfaz; app.config.ts selecciona mock o HTTP.
+ * El adaptador HTTP usa AuthService/SessionService y mantiene el JWT en memoria.
  */
 export interface SesionUi {
   readonly usuario: Signal<UsuarioUi | null>;
