@@ -32,9 +32,9 @@ import { Component, input, output } from '@angular/core';
   styles: `
     .caja { display: grid; justify-items: center; gap: .5rem; text-align: center; padding: 3rem 1.5rem; }
     .caja p { margin: 0; }
-    .icono { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; font-size: 1.5rem; font-weight: 700; background: var(--info-bg); color: var(--info); }
-    .icono.err { background: var(--err-bg); color: var(--err); }
-    .spinner { width: 36px; height: 36px; border-radius: 50%; border: 4px solid rgba(11,92,255,.15); border-top-color: var(--azul); animation: girar .8s linear infinite; }
+    .icono { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; font-size: 1.5rem; font-weight: 700; background: radial-gradient(circle at 35% 30%, #fff, var(--info-bg) 70%); color: var(--info); box-shadow: var(--nb-lente-sombra), 0 10px 20px -10px rgba(11,92,255,.45); }
+    .icono.err { background: radial-gradient(circle at 35% 30%, #fff, var(--err-bg) 70%); color: var(--err); box-shadow: var(--nb-lente-sombra), 0 10px 20px -10px rgba(194,33,58,.4); }
+    .spinner { width: 40px; height: 40px; border-radius: 50%; border: 4px solid rgba(11,92,255,.12); border-top-color: var(--azul); box-shadow: var(--nb-lente-sombra); animation: girar .8s linear infinite; }
     @keyframes girar { to { transform: rotate(360deg); } }
   `,
 })

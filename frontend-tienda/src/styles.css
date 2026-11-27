@@ -104,3 +104,134 @@ img { max-width: 100%; display: block; }
 /* Entrada sutil de vistas */
 @keyframes aparecer { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 .principal > * { animation: aparecer .35s ease-out both; }
+
+/* ==========================================================================
+   Sistema Liquid Glass Nébula
+   - Borde especular cónico + reflejo móvil (receta "glass button")
+   - Contorno de lente con reflejos inset multidireccionales ("lens button")
+   - Refracción real con filtro SVG compartido (#nb-refraccion, definido una
+     sola vez en el shell) solo en superficies .lente; degrada a blur.
+   ========================================================================== */
+@property --nb-angulo { syntax: '<angle>'; inherits: false; initial-value: -75deg; }
+@property --nb-brillo { syntax: '<angle>'; inherits: false; initial-value: -45deg; }
+
+:root {
+  --nb-t: 400ms;
+  --nb-ease: cubic-bezier(.25, 1, .5, 1);
+  --nb-borde: 1px;
+  /* Reflejos de lente: luz superior-izquierda y contraluz inferior */
+  --nb-lente-sombra:
+    inset 1.5px -1.5px 1px -1px rgba(255,255,255,.95),
+    inset -1.5px 1.5px 1px -1px rgba(255,255,255,.95),
+    inset 6px -6px 2px -6px rgba(255,255,255,.6),
+    inset -6px 6px 2px -6px rgba(255,255,255,.6),
+    inset 0 0 1.5px rgba(10,26,69,.28);
+  --nb-cristal-sombra:
+    inset 0 0 2px 1px rgba(255,255,255,.55),
+    inset 0 0 10px 4px rgba(255,255,255,.18),
+    inset 0 6px 24px rgba(17,30,80,.05);
+}
+
+/* --- Borde especular reutilizable ---------------------------------------- */
+.glass::after, .tarjeta::after, .btn::after, .nb-especular::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  padding: var(--nb-borde);
+  background:
+    conic-gradient(from var(--nb-angulo) at 50% 50%,
+      rgba(255,255,255,.95), rgba(255,255,255,0) 6% 40%,
+      rgba(255,255,255,.85) 50%, rgba(255,255,255,0) 60% 94%, rgba(255,255,255,.95)),
+    linear-gradient(180deg, rgba(120,150,220,.28), rgba(120,150,220,.14));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  transition: --nb-angulo 600ms ease;
+}
+.glass:hover::after, .tarjeta:hover::after, .btn:hover::after { --nb-angulo: -125deg; }
+
+/* --- Superficies ---------------------------------------------------------- */
+.glass {
+  background: linear-gradient(135deg, rgba(255,255,255,.62), rgba(255,255,255,.32));
+  border-color: transparent;
+  box-shadow: var(--sombra), var(--nb-cristal-sombra);
+}
+.glass::before {
+  background:
+    radial-gradient(120% 60% at 15% 0%, rgba(255,255,255,.65), transparent 55%),
+    linear-gradient(180deg, rgba(255,255,255,.35), transparent 40%);
+  mix-blend-mode: normal; opacity: .9;
+}
+.tarjeta { position: relative; outline: 0; border-color: transparent; box-shadow: var(--sombra), var(--nb-cristal-sombra); }
+
+/* Refracción SVG: solo navegadores que aceptan url() en backdrop-filter
+   (Chromium). El resto conserva el blur declarado antes. */
+.lente {
+  backdrop-filter: blur(16px) saturate(1.6);
+  -webkit-backdrop-filter: blur(16px) saturate(1.6);
+}
+@supports (backdrop-filter: url(#nb-refraccion)) and (not (background: -webkit-named-image(i))) {
+  .lente { backdrop-filter: url(#nb-refraccion) blur(10px) saturate(1.7); }
+}
+
+/* --- Botones ---------------------------------------------------------------- */
+.btn {
+  position: relative; isolation: isolate; border: 0; border-radius: 999px;
+  transition: transform var(--nb-t) var(--nb-ease), box-shadow var(--nb-t) var(--nb-ease), filter .2s, background .2s;
+}
+/* Reflejo móvil: se desplaza en hover y cambia de ángulo al presionar */
+.btn::before {
+  content: ''; position: absolute; inset: 1px; z-index: -1; border-radius: inherit; pointer-events: none;
+  background: linear-gradient(var(--nb-brillo), rgba(255,255,255,0) 0%, rgba(255,255,255,.4) 40% 50%, rgba(255,255,255,0) 55%) 100% 50% / 200% 200% no-repeat;
+  mix-blend-mode: screen; opacity: 0;
+  transition: opacity var(--nb-t) var(--nb-ease), background-position calc(var(--nb-t) * 1.25) var(--nb-ease), --nb-brillo calc(var(--nb-t) * 1.25) var(--nb-ease);
+}
+.btn:hover::before, .btn:focus-visible::before { opacity: 1; background-position: 55% 50%; }
+.btn:active::before { opacity: 1; background-position: 35% 15%; --nb-brillo: -15deg; }
+.btn:hover { transform: translateY(-1px); }
+.btn:active { transform: scale(.975); }
+.btn:focus-visible { outline: 3px solid var(--cian); outline-offset: 3px; }
+
+.btn-primario {
+  background: linear-gradient(135deg, #3d86ff 0%, #0b5cff 50%, #0842c4 100%);
+  box-shadow: 0 10px 22px -8px rgba(11,92,255,.6), inset 0 1px 1px rgba(255,255,255,.5), inset 0 -2px 4px rgba(4,30,110,.35);
+  text-shadow: 0 1px 1px rgba(4,30,110,.35);
+}
+.btn-primario::after { background:
+  conic-gradient(from var(--nb-angulo) at 50% 50%, rgba(255,255,255,.9), rgba(255,255,255,0) 6% 40%, rgba(255,255,255,.6) 50%, rgba(255,255,255,0) 60% 94%, rgba(255,255,255,.9)),
+  linear-gradient(180deg, rgba(255,255,255,.25), rgba(255,255,255,.1)); }
+.btn-secundario {
+  background: linear-gradient(-75deg, rgba(255,255,255,.55), rgba(255,255,255,.85), rgba(255,255,255,.55));
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  color: var(--azul); box-shadow: var(--nb-lente-sombra), 0 6px 14px -8px rgba(20,50,120,.35);
+}
+.btn-secundario:hover { background: linear-gradient(-75deg, rgba(235,242,255,.7), rgba(255,255,255,.95), rgba(235,242,255,.7)); }
+.btn:disabled, .btn[disabled] { opacity: .5; cursor: not-allowed; transform: none; filter: saturate(.6); }
+.btn:disabled::before { display: none; }
+
+/* --- Controles tipo lente (iconos, chips, campos) -------------------------- */
+.nb-lente-control {
+  background: linear-gradient(-75deg, rgba(255,255,255,.5), rgba(255,255,255,.85), rgba(255,255,255,.5));
+  box-shadow: var(--nb-lente-sombra), 0 6px 14px -8px rgba(20,50,120,.35);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.input, select.input, textarea.input {
+  background: linear-gradient(180deg, rgba(255,255,255,.75), rgba(255,255,255,.92));
+  border: 1px solid rgba(120,150,220,.32);
+  box-shadow: inset 0 1px 3px rgba(17,30,80,.08), inset 0 -1px 0 rgba(255,255,255,.9);
+  transition: border-color .2s, box-shadow .2s;
+}
+.input:hover { border-color: rgba(11,92,255,.4); }
+.input:focus { outline: 0; border-color: var(--azul); box-shadow: 0 0 0 4px rgba(6,191,232,.28), inset 0 1px 3px rgba(17,30,80,.08); }
+.input[aria-invalid='true'] { border-color: var(--err); box-shadow: 0 0 0 3px rgba(194,33,58,.14); }
+.chip { box-shadow: inset 0 1px 0 rgba(255,255,255,.7), inset 0 0 0 1px rgba(255,255,255,.35); }
+.etiqueta { background: linear-gradient(180deg, rgba(240,245,255,.95), rgba(226,234,250,.85)); box-shadow: inset 0 1px 0 #fff, inset 0 0 0 1px rgba(120,150,220,.18); }
+
+@media (hover: none) and (pointer: coarse) {
+  .btn:hover { transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn:hover, .btn:active { transform: none; }
+}
+@media (prefers-contrast: more) {
+  .glass, .tarjeta { background: #fff; }
+  .glass::before, .btn::before { display: none; }
+}

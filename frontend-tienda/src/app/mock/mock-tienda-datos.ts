@@ -4,9 +4,9 @@
  */
 import { Injectable } from '@angular/core';
 import { aCentavos, deCentavos } from '../datos/dinero';
-import { CotizacionEnvio, Direccion, ItemCarrito, MetodoPago, Pedido, Producto, ResumenResenas } from '../datos/models';
+import { ComprobantePago, CotizacionEnvio, Direccion, ItemCarrito, MetodoPago, Pedido, Producto, ResumenResenas } from '../datos/models';
 import { TiendaDatos } from '../datos/tienda-datos';
-import { INVENTARIO, PEDIDOS, PRODUCTOS, RESENAS, USUARIO_DEMO } from './fixtures';
+import { INVENTARIO, PAGOS_DEMO, PEDIDOS, PRODUCTOS, RESENAS, USUARIO_DEMO } from './fixtures';
 
 const modo = () => new URLSearchParams(location.search).get('mock');
 const normalizar = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
@@ -90,4 +90,12 @@ export class MockTiendaDatos implements TiendaDatos {
   nuevoIntentoCheckout(): void { /* Los mocks no necesitan clave de idempotencia. */ }
 
   misPedidos() { return this.latencia(() => modo() === 'vacio' ? [] : [...this.pedidos]); }
+
+  comprobantePago(pedidoId: string): Promise<ComprobantePago> {
+    return this.latencia(() => {
+      const receipt = PAGOS_DEMO[pedidoId];
+      if (!receipt) throw new Error('El pedido aún no tiene un comprobante disponible.');
+      return receipt;
+    }, 300);
+  }
 }

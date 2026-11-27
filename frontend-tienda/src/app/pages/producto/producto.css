@@ -43,3 +43,15 @@
 }
 .invitar { margin: 1.5rem 0 0; padding-top: 1.5rem; border-top: 1px solid var(--borde); }
 @media (max-width: 860px) { .info { position: static; } }
+
+.cantidad { border: 0; border-radius: 999px; box-shadow: var(--nb-lente-sombra); background: linear-gradient(-75deg, rgba(255,255,255,.5), rgba(255,255,255,.9), rgba(255,255,255,.5)); }
+.cantidad button { border-radius: 999px; transition: background .2s, transform .15s; }
+.cantidad button:hover:not(:disabled) { background: rgba(11,92,255,.08); }
+.cantidad button:active:not(:disabled) { transform: scale(.9); }
+.galeria { position: relative; }
+.galeria img { box-shadow: inset 0 0 0 1px rgba(255,255,255,.8); }
+.resumen { box-shadow: var(--nb-lente-sombra); background: linear-gradient(160deg, rgba(234,242,255,.9), rgba(246,249,255,.7)); }
+.avatar { box-shadow: inset 0 1px 1px rgba(255,255,255,.6), 0 4px 10px -4px rgba(11,92,255,.6); }
+.estrella { transition: transform .15s, color .15s; }
+.estrella:hover { transform: scale(1.12); }
+@media (prefers-reduced-motion: reduce) { .estrella:hover, .cantidad button:active { transform: none; } }

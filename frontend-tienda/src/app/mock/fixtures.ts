@@ -1,8 +1,7 @@
 /**
- * FIXTURES DE DEMOSTRACIÓN — no son datos reales.
- * Reemplazar por la capa API cuando el coordinador la integre (ver tienda-datos.ts).
+ * FIXTURES DE DEMOSTRACIÓN — no son datos reales; solo los consume MockTiendaDatos.
  */
-import { Pedido, Producto, Resena } from '../datos/models';
+import { ComprobantePago, Pedido, Producto, Resena } from '../datos/models';
 
 export const USUARIO_DEMO = '00000000-0000-4000-8000-000000000001';
 
@@ -64,3 +63,10 @@ export const PEDIDOS: Pedido[] = [
     direccion: { codigo_postal: '03100', calle: 'Av. Universidad 1200', ciudad: 'Ciudad de México', estado: 'CDMX' },
     costo_envio: '129.00', total: '1427.00' },
 ];
+
+/** Comprobantes ficticios para pedidos de demostración con pago concluido. */
+export const PAGOS_DEMO: Record<string, ComprobantePago> = {
+  [uuid(10542)]: { id: uuid(30542), pedido_id: uuid(10542), monto: '3527.00', metodo_pago: 'tarjeta_simulada', estado: 'aprobado', creado_en: '2026-11-15T17:21:00Z' },
+  [uuid(10541)]: { id: uuid(30541), pedido_id: uuid(10541), monto: '2048.00', metodo_pago: 'tarjeta_simulada', estado: 'aprobado', creado_en: '2026-11-10T12:06:00Z' },
+  [uuid(10539)]: { id: uuid(30539), pedido_id: uuid(10539), monto: '1427.00', metodo_pago: 'transferencia_simulada', estado: 'rechazado', creado_en: '2026-10-28T19:16:00Z' },
+};

@@ -86,7 +86,7 @@ export class ProductoDetalle {
     e.preventDefault();
     this.errorResena.set('');
     if (!this.calificacion()) return this.errorResena.set('Selecciona una calificación de 1 a 5 estrellas.');
-    if (this.comentario().trim().length < 5) return this.errorResena.set('Escribe un comentario de al menos 5 caracteres.');
+    if (this.comentario().length > 1000) return this.errorResena.set('El comentario no puede superar 1000 caracteres.');
     this.enviando.set(true);
     try {
       await this.datos.crearResena({ producto_id: this.id(), calificacion: this.calificacion(), comentario: this.comentario().trim() });

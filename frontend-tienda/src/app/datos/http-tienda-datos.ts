@@ -3,7 +3,7 @@ import { firstValueFrom, Observable } from 'rxjs';
 import { StoreApiService } from '../core/api/store-api.service';
 import { SessionService } from '../core/auth/session.service';
 import { toApiProblem } from '../core/api/api-error';
-import { CotizacionEnvio, Direccion, ItemCarrito, MetodoPago, Pedido, Producto, ResumenResenas } from './models';
+import { ComprobantePago, CotizacionEnvio, Direccion, ItemCarrito, MetodoPago, Pedido, Producto, ResumenResenas } from './models';
 import { TiendaDatos } from './tienda-datos';
 
 /**
@@ -16,10 +16,17 @@ export class HttpTiendaDatos implements TiendaDatos {
   private readonly api = inject(StoreApiService);
   private readonly session = inject(SessionService);
   private checkoutKey: string | null = null;
+  private readonly cartAddKeys = new Map<string, string>();
 
   async listarProductos(filtro: { busqueda?: string; categoria?: string }): Promise<Producto[]> {
-    const page = await this.execute(this.api.listProducts({ q: filtro.busqueda, categoria: filtro.categoria, pagina: 1, limite: 100 }));
-    return page.items;
+    const options = { q: filtro.busqueda, categoria: filtro.categoria, limite: 100 };
+    const first = await this.execute(this.api.listProducts({ ...options, pagina: 1 }));
+    const paginas = Math.ceil(first.total / first.limite);
+    if (paginas <= 1) return first.items;
+    const restantes = await Promise.all(Array.from({ length: paginas - 1 }, (_, index) =>
+      this.execute(this.api.listProducts({ ...options, pagina: index + 2 })),
+    ));
+    return [ ...first.items, ...restantes.flatMap((page) => page.items) ];
   }
 
   async obtenerProducto(id: string): Promise<Producto> {
@@ -47,8 +54,19 @@ export class HttpTiendaDatos implements TiendaDatos {
 
   async agregarAlCarrito(item: ItemCarrito): Promise<ItemCarrito[]> {
     const userId = this.requireUserId();
-    const cart = await this.execute(this.api.addToCart(userId, item.producto_id, item.cantidad));
-    return cart.items.map(({ producto_id, cantidad }) => ({ producto_id, cantidad }));
+    const fingerprint = JSON.stringify([userId, item.producto_id, item.cantidad]);
+    const key = this.cartAddKeys.get(fingerprint) ?? crypto.randomUUID();
+    this.cartAddKeys.set(fingerprint, key);
+    try {
+      const cart = await this.execute(this.api.addToCart(userId, item.producto_id, item.cantidad, key));
+      this.cartAddKeys.delete(fingerprint);
+      return cart.items.map(({ producto_id, cantidad }) => ({ producto_id, cantidad }));
+    } catch (error) {
+      const problem = toApiProblem(error);
+      // Un 503 o una desconexión deja incierto el resultado; el siguiente intento repite la clave.
+      if (problem.status !== 503 && problem.status !== 0) this.cartAddKeys.delete(fingerprint);
+      throw problem;
+    }
   }
 
   async cotizarEnvio(codigoPostal: string, cantidad: number): Promise<CotizacionEnvio> {
@@ -71,6 +89,10 @@ export class HttpTiendaDatos implements TiendaDatos {
 
   async misPedidos(): Promise<Pedido[]> {
     return this.execute(this.api.getOrderHistory(this.requireUserId()));
+  }
+
+  async comprobantePago(pedidoId: string): Promise<ComprobantePago> {
+    return this.execute(this.api.getPaymentReceipt(pedidoId));
   }
 
   /** Inicia explícitamente otro intento tras mostrar el resultado del anterior. */

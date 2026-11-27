@@ -19,7 +19,7 @@
             </div>
             <div class="miniaturas" aria-hidden="true">
               @for (i of p.items.slice(0, 3); track i.producto_id) {
-                @if (productos()[i.producto_id]; as prod) { <img [src]="prod.imagen_url" alt="" width="48" height="36" /> }
+                @if (productos()[i.producto_id]; as prod) { <img [src]="prod.imagen_url || '/mock/electronica.svg'" (error)="usarImagenRespaldo($event.target, prod.categoria)" alt="" width="48" height="36" /> }
               }
             </div>
             <div class="total"><span class="muted">Total</span><strong>{{ p.total | mxn }}</strong></div>
@@ -61,6 +61,30 @@
                 </tbody>
               </table>
               <p class="muted">Envío: {{ p.costo_envio | mxn }} · Entrega en {{ p.direccion.calle }}, {{ p.direccion.ciudad }}, {{ p.direccion.estado }} C.P. {{ p.direccion.codigo_postal }}</p>
+              <section class="comprobante" aria-label="Comprobante de pago" aria-live="polite">
+                <h3>Comprobante de pago</h3>
+                @if (p.estado === 'pendiente') {
+                  <p class="muted">Disponible cuando el pago del pedido se complete.</p>
+                } @else {
+                  @let pago = comprobantes()[p.id];
+                  @if (!pago || pago.estado === 'cargando') {
+                    <p class="muted" role="status">Cargando comprobante…</p>
+                  } @else if (pago.estado === 'sin-datos') {
+                    <p class="muted">{{ pago.mensaje }}</p>
+                  } @else if (pago.estado === 'error') {
+                    <p class="muted" role="alert">{{ pago.mensaje }}</p>
+                    <button type="button" class="btn btn-secundario" (click)="cargarComprobante(p.id)">Reintentar</button>
+                  } @else {
+                    <dl class="datos-comprobante">
+                      <div><dt>Folio</dt><dd>{{ pago.datos.id.slice(-8).toUpperCase() }}</dd></div>
+                      <div><dt>Método</dt><dd>{{ pago.datos.metodo_pago === 'tarjeta_simulada' ? 'Tarjeta simulada' : 'Transferencia simulada' }}</dd></div>
+                      <div><dt>Resultado</dt><dd>{{ pago.datos.estado === 'aprobado' ? 'Aprobado' : 'Rechazado' }}</dd></div>
+                      <div><dt>Monto</dt><dd>{{ pago.datos.monto | mxn }}</dd></div>
+                      <div><dt>Fecha</dt><dd>{{ pago.datos.creado_en | date: "d 'de' MMMM 'de' y, HH:mm" : undefined : 'es-MX' }}</dd></div>
+                    </dl>
+                  }
+                }
+              </section>
             </div>
           }
         </li>

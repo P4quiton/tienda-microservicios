@@ -1,9 +1,10 @@
 import { DatePipe } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { Carga, EstadoPedido, Pedido, Producto } from '../../datos/models';
+import { Carga, ComprobantePago, EstadoPedido, Pedido, Producto } from '../../datos/models';
 import { TIENDA_DATOS } from '../../datos/tienda-datos';
 import { EstadoVista } from '../../shared/estado-vista';
+import { usarImagenRespaldo } from '../../shared/imagen-respaldo';
 import { MxnPipe } from '../../shared/mxn.pipe';
 
 const ESTADOS: Record<EstadoPedido, { texto: string; clase: string }> = {
@@ -32,6 +33,8 @@ export class MisPedidos {
   protected lista = computed(() => { const e = this.estado(); return e.estado === 'listo' ? e.datos : []; });
   protected productos = signal<Record<string, Producto>>({});
   protected abierto = signal<string | null>(null);
+  protected comprobantes = signal<Record<string, Carga<ComprobantePago>>>({});
+  protected usarImagenRespaldo = usarImagenRespaldo;
 
   constructor() { this.cargar(); }
 
@@ -48,6 +51,29 @@ export class MisPedidos {
     }
   }
 
-  alternar(id: string) { this.abierto.update((a) => (a === id ? null : id)); }
+  alternar(id: string) {
+    const cerrar = this.abierto() === id;
+    this.abierto.set(cerrar ? null : id);
+    if (cerrar) return;
+    const pedido = this.lista().find((p) => p.id === id);
+    if (pedido && pedido.estado !== 'pendiente') void this.cargarComprobante(id);
+  }
+
+  async cargarComprobante(pedidoId: string) {
+    const actual = this.comprobantes()[pedidoId];
+    if (actual?.estado === 'cargando' || actual?.estado === 'listo') return;
+    this.comprobantes.update((m) => ({ ...m, [pedidoId]: { estado: 'cargando' } }));
+    try {
+      const datos = await this.datos.comprobantePago(pedidoId);
+      this.comprobantes.update((m) => ({ ...m, [pedidoId]: { estado: 'listo', datos } }));
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'status' in error && error.status === 404) {
+        this.comprobantes.update((m) => ({ ...m, [pedidoId]: { estado: 'sin-datos', mensaje: 'No se registró un pago para este pedido.' } }));
+        return;
+      }
+      this.comprobantes.update((m) => ({ ...m, [pedidoId]: { estado: 'error', mensaje: (error as Error).message } }));
+    }
+  }
+
   folio(id: string) { return 'NB-' + id.slice(-5).toUpperCase(); }
 }

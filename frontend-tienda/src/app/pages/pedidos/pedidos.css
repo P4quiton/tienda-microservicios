@@ -29,6 +29,12 @@
 .detalle table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 .detalle th { text-align: left; color: var(--texto-2); font-weight: 600; padding: .4rem 0; }
 .detalle td { padding: .4rem 0; border-top: 1px solid var(--borde); }
+.comprobante { margin-top: 1.2rem; padding-top: 1rem; border-top: 1px solid var(--borde); }
+.comprobante h3 { margin: 0 0 .7rem; font-size: 1rem; }
+.datos-comprobante { display: flex; flex-wrap: wrap; gap: .65rem 1.5rem; margin: 0; }
+.datos-comprobante div { display: grid; gap: .15rem; }
+.datos-comprobante dt { color: var(--texto-2); font-size: .8rem; }
+.datos-comprobante dd { margin: 0; font-weight: 600; }
 .nota { margin-top: 1rem; }
 @media (max-width: 1000px) {
   .fila { grid-template-columns: 1fr auto; }
@@ -36,3 +42,11 @@
   .seguimiento, .guia { grid-column: 1 / -1; }
   .expandir { grid-row: 1; grid-column: 2; }
 }
+
+.expandir { border: 0; background: linear-gradient(-75deg, rgba(255,255,255,.5), rgba(255,255,255,.9), rgba(255,255,255,.5)); box-shadow: var(--nb-lente-sombra), 0 6px 12px -8px rgba(20,50,120,.4); }
+.expandir:hover { background: #fff; }
+.expandir:active { transform: scale(.92); }
+.linea-tiempo .punto { box-shadow: var(--nb-lente-sombra); }
+.linea-tiempo .hecho .punto { box-shadow: inset 0 0 0 4px #fff, 0 0 0 3px rgba(15,138,75,.15); }
+.detalle { border-top-color: rgba(120,150,220,.2); }
+@media (prefers-reduced-motion: reduce) { .expandir:active { transform: none; } }

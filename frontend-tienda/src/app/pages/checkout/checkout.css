@@ -44,3 +44,10 @@
   .linea { grid-template-columns: 56px 1fr auto; } .importe { grid-column: 2 / -1; text-align: left; }
   .pasos li + li::before { width: 16px; }
 }
+
+.pasos { box-shadow: var(--sombra), var(--nb-lente-sombra); border: 0; }
+.num { box-shadow: var(--nb-lente-sombra); border-color: rgba(120,150,220,.3); }
+.metodo { border: 0; background: linear-gradient(-75deg, rgba(255,255,255,.55), rgba(255,255,255,.9), rgba(255,255,255,.55)); box-shadow: var(--nb-lente-sombra); }
+.metodo.sel { background: linear-gradient(-75deg, rgba(220,232,255,.8), rgba(240,246,255,.95), rgba(220,232,255,.8)); box-shadow: inset 0 0 0 1.5px var(--azul), var(--nb-lente-sombra); }
+.metodo:focus-within { outline: 3px solid var(--cian); outline-offset: 2px; }
+.sello { box-shadow: inset 0 2px 2px rgba(255,255,255,.45), inset 0 -3px 6px rgba(0,0,0,.2), 0 12px 24px -10px currentColor; }

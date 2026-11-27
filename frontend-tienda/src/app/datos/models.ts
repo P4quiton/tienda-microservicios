@@ -59,8 +59,18 @@ export interface Pedido {
   creado_en: string;
 }
 
+export interface ComprobantePago {
+  id: string;
+  pedido_id: string;
+  monto: Monto;
+  metodo_pago: MetodoPago;
+  estado: 'aprobado' | 'rechazado';
+  creado_en: string;
+}
+
 /** Estado genérico de carga para las vistas. */
 export type Carga<T> =
   | { estado: 'cargando' }
   | { estado: 'error'; mensaje: string }
+  | { estado: 'sin-datos'; mensaje: string }
   | { estado: 'listo'; datos: T };

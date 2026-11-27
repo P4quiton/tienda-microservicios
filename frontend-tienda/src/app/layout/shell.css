@@ -31,3 +31,12 @@
 .salir { background: none; border: 0; font: inherit; font-size: .82rem; color: var(--texto-2); text-decoration: underline; cursor: pointer; }
 .entrar { padding: .5rem 1rem; border-radius: 999px; font-size: .9rem; }
 @media (max-width: 760px) { .nombre-usuario { display: none; } }
+.nb-filtros { position: absolute; width: 0; height: 0; overflow: hidden; }
+.carrito { background: none; border: 0; transition: transform var(--nb-t) var(--nb-ease), box-shadow .2s; }
+.carrito:hover { transform: translateY(-1px) scale(1.04); }
+.carrito:active { transform: scale(.94); }
+.busqueda { border: 0; }
+.enlaces { background: rgba(255,255,255,.35); box-shadow: var(--nb-lente-sombra); border: 0; }
+.enlaces a.activo { position: relative; box-shadow: 0 8px 18px -8px rgba(10,26,69,.7), inset 0 1px 1px rgba(255,255,255,.35), inset 0 -2px 4px rgba(0,0,0,.25); }
+.marca img { filter: drop-shadow(0 1px 0 rgba(255,255,255,.9)); }
+@media (prefers-reduced-motion: reduce) { .carrito:hover, .carrito:active { transform: none; } }

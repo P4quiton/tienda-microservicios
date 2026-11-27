@@ -53,11 +53,11 @@ export class StoreApiService {
     return this.http.get<ApiSuccess<Cart>>(`/api/carrito/${encodeURIComponent(userId)}`).pipe(map(({ data }) => data));
   }
 
-  addToCart(userId: string, productId: string, quantity: number): Observable<Cart> {
+  addToCart(userId: string, productId: string, quantity: number, idempotencyKey: string = crypto.randomUUID()): Observable<Cart> {
     return this.http.post<ApiSuccess<Cart>>(
       `/api/carrito/${encodeURIComponent(userId)}/agregar`,
       { producto_id: productId, cantidad: quantity },
-      { headers: { 'Idempotency-Key': crypto.randomUUID() } },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
     ).pipe(map(({ data }) => data));
   }
 
