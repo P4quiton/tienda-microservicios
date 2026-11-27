@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300"><defs>
+<radialGradient id="bg" cx=".5" cy=".42" r=".75"><stop offset="0" stop-color="#ffffff"/><stop offset=".55" stop-color="#e6e4ff"/><stop offset="1" stop-color="#cfc8ff"/></radialGradient>
+<linearGradient id="m" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4f6fb"/><stop offset="1" stop-color="#c3c9d8"/></linearGradient>
+<linearGradient id="h" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".7"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+</defs><rect width="400" height="300" fill="url(#bg)"/><ellipse cx="200" cy="262" rx="110" ry="12" fill="#0a1a45" opacity=".14"/>
+<rect x="170" y="40" width="60" height="70" rx="14" fill="url(#m)"/><rect x="170" y="190" width="60" height="70" rx="14" fill="url(#m)"/>
+<rect x="140" y="88" width="120" height="124" rx="34" fill="#1b2340"/><rect x="150" y="98" width="100" height="104" rx="26" fill="url(#bg)" opacity=".18"/>
+<text x="200" y="156" text-anchor="middle" font-family="system-ui,sans-serif" font-size="34" font-weight="700" fill="#fff">10:28</text>
+<path d="M170 176h60" stroke="#06bfe8" stroke-width="5" stroke-linecap="round"/><rect x="258" y="130" width="8" height="26" rx="4" fill="#c3c9d8"/>
+<rect x="148" y="94" width="104" height="30" rx="20" fill="url(#h)" opacity=".35"/></svg>

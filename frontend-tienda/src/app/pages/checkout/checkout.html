@@ -1,0 +1,108 @@
+<ol class="pasos" aria-label="Progreso de compra">
+  @for (p of ['Carrito', 'Envío', 'Pago', 'Confirmación']; track p; let i = $index) {
+    <li [class.hecho]="paso() > i + 1" [class.actual]="paso() === i + 1" [attr.aria-current]="paso() === i + 1 ? 'step' : null">
+      <span class="num" aria-hidden="true">{{ paso() > i + 1 ? '✓' : i + 1 }}</span>{{ p }}
+    </li>
+  }
+</ol>
+
+@if (resultado(); as r) {
+  @if (r.estado === 'cancelado') {
+    <section class="confirmacion tarjeta" role="alert">
+      <span class="sello err" aria-hidden="true">✕</span>
+      <h1>Pago rechazado</h1>
+      <p class="subtitulo">El pago simulado fue rechazado. Tu carrito se conservó; puedes volver al checkout y elegir cómo continuar.</p>
+      <p class="muted">Pedido de referencia: {{ r.id.slice(-8).toUpperCase() }}</p>
+      <div class="acciones">
+        <button type="button" class="btn btn-primario" (click)="reintentarPago()">Volver al checkout</button>
+        <a routerLink="/mis-pedidos" class="btn btn-secundario">Ver mis pedidos</a>
+      </div>
+    </section>
+  } @else {
+    <section class="confirmacion tarjeta" role="status">
+      <span class="sello" aria-hidden="true">✓</span>
+      <h1>¡Compra confirmada!</h1>
+      <p class="subtitulo">Pedido <strong>{{ r.id.slice(-8).toUpperCase() }}</strong> por <strong>{{ r.total | mxn }}</strong>. Te avisaremos cuando se envíe.</p>
+      <div class="acciones">
+        <a routerLink="/mis-pedidos" class="btn btn-primario">Ver mis pedidos</a>
+        <a routerLink="/catalogo" class="btn btn-secundario">Seguir comprando</a>
+      </div>
+    </section>
+  }
+} @else if (cargando()) {
+  <app-estado-vista tipo="cargando" titulo="Cargando tu carrito…" />
+} @else if (error()) {
+  <app-estado-vista tipo="error" titulo="No pudimos cargar tu carrito" [mensaje]="error()" (reintentar)="cargar()" />
+} @else if (!lineas().length) {
+  <app-estado-vista titulo="Tu carrito está vacío" mensaje="Explora el catálogo y agrega productos para comenzar.">
+    <a routerLink="/catalogo" class="btn btn-primario">Ir al catálogo</a>
+  </app-estado-vista>
+} @else {
+  <div class="layout">
+    <div class="columna">
+      <section class="tarjeta bloque" aria-labelledby="t-carrito">
+        <h1 id="t-carrito">Tu carrito</h1>
+        <ul class="lineas">
+          @for (l of lineas(); track l.producto.id) {
+            <li class="linea">
+              <img [src]="l.producto.imagen_url" alt="" width="72" height="54" />
+              <div class="nombre"><strong>{{ l.producto.nombre }}</strong><span class="muted">{{ l.producto.precio | mxn }} c/u</span></div>
+              <span class="cant" [attr.aria-label]="'Cantidad ' + l.cantidad">× {{ l.cantidad }}</span>
+              <span class="importe">{{ l.importe | mxn }}</span>
+            </li>
+          }
+        </ul>
+        <p class="nota-contrato muted">
+          <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 8v5M12 16h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          Por ahora solo puedes agregar unidades desde el catálogo. Quitar o editar artículos no está disponible en la versión actual del servicio de carrito.
+        </p>
+      </section>
+
+      <section class="tarjeta bloque" aria-labelledby="t-envio">
+        <h2 id="t-envio">Cotiza tu envío</h2>
+        <div class="fila-cp">
+          <label class="campo">Código postal
+            <input class="input" inputmode="numeric" maxlength="5" name="cp" [(ngModel)]="direccion.codigo_postal" placeholder="03100"
+              [attr.aria-invalid]="!!errorCp()" aria-describedby="error-cp" (keydown.enter)="cotizar()" />
+          </label>
+          <button type="button" class="btn btn-primario" [disabled]="cotizando()" (click)="cotizar()">{{ cotizando() ? 'Cotizando…' : 'Cotizar envío' }}</button>
+          @if (cotizacion(); as c) { <span class="chip ok" role="status">✓ {{ c.costo_envio | mxn }} · {{ c.dias_estimados }} días hábiles</span> }
+        </div>
+        <p id="error-cp" class="error-campo" role="alert">{{ errorCp() }}</p>
+        <div class="direccion">
+          <label class="campo calle">Calle y número <input class="input" name="calle" [(ngModel)]="direccion.calle" autocomplete="street-address" /></label>
+          <label class="campo">Ciudad <input class="input" name="ciudad" [(ngModel)]="direccion.ciudad" autocomplete="address-level2" /></label>
+          <label class="campo">Estado <input class="input" name="estado" [(ngModel)]="direccion.estado" autocomplete="address-level1" /></label>
+        </div>
+      </section>
+
+      <section class="tarjeta bloque" aria-labelledby="t-pago">
+        <h2 id="t-pago">Método de pago <span class="muted">(demostración)</span></h2>
+        <div class="metodos" role="radiogroup" aria-labelledby="t-pago">
+          <label class="metodo" [class.sel]="metodo() === 'tarjeta_simulada'">
+            <input type="radio" name="metodo" [checked]="metodo() === 'tarjeta_simulada'" (change)="metodo.set('tarjeta_simulada')" />
+            <span><strong>Tarjeta simulada</strong><span class="muted">Pago de prueba, sin cargos reales.</span></span>
+          </label>
+          <label class="metodo" [class.sel]="metodo() === 'transferencia_simulada'">
+            <input type="radio" name="metodo" [checked]="metodo() === 'transferencia_simulada'" (change)="metodo.set('transferencia_simulada')" />
+            <span><strong>Transferencia simulada</strong><span class="muted">Simula una transferencia; en el entorno de prueba resulta rechazada.</span></span>
+          </label>
+        </div>
+      </section>
+    </div>
+
+    <aside class="resumen glass" aria-labelledby="t-resumen">
+      <h2 id="t-resumen">Resumen del pedido</h2>
+      <dl>
+        <div><dt>Subtotal ({{ carrito.unidades() }} productos)</dt><dd>{{ subtotal() | mxn }}</dd></div>
+        <div><dt>Envío</dt><dd>{{ cotizacion() ? (cotizacion()!.costo_envio | mxn) : 'Por cotizar' }}</dd></div>
+        <div class="total"><dt>Total</dt><dd>{{ total() ? (total() | mxn) : '—' }}</dd></div>
+      </dl>
+      <p class="seguro"><span aria-hidden="true">🛡</span> <span><strong>Pago de demostración seguro</strong><br /><span class="muted">Compra de prueba sin cargos reales. El servidor recalcula precios y envío.</span></span></p>
+      <p class="error-campo" role="alert">{{ errorPedido() }}</p>
+      <button type="button" class="btn btn-primario btn-grande" [disabled]="confirmando()" (click)="confirmar()">
+        {{ confirmando() ? 'Procesando…' : 'Confirmar compra' }}
+      </button>
+    </aside>
+  </div>
+}

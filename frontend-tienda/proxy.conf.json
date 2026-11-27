@@ -1,0 +1,10 @@
+{
+  "/api/usuarios": { "target": "http://localhost:8001", "secure": false, "changeOrigin": true },
+  "/api/productos": { "target": "http://localhost:8002", "secure": false, "changeOrigin": true },
+  "/api/envios": { "target": "http://localhost:8003", "secure": false, "changeOrigin": true },
+  "/api/inventario": { "target": "http://localhost:8004", "secure": false, "changeOrigin": true },
+  "/api/carrito": { "target": "http://localhost:8005", "secure": false, "changeOrigin": true },
+  "/api/pedidos": { "target": "http://localhost:8006", "secure": false, "changeOrigin": true },
+  "/api/pagos": { "target": "http://localhost:8007", "secure": false, "changeOrigin": true },
+  "/api/resenas": { "target": "http://localhost:8008", "secure": false, "changeOrigin": true }
+}

@@ -1,0 +1,32 @@
+<a class="saltar" href="#contenido">Saltar al contenido</a>
+<header class="encabezado">
+  <nav class="contenedor barra glass" aria-label="Principal">
+    <a routerLink="/catalogo" class="marca"><img src="brand/nebula-logo.png" alt="Nébula" width="130" height="43" /></a>
+    <ul class="enlaces">
+      <li><a routerLink="/catalogo" routerLinkActive="activo" ariaCurrentWhenActive="page">Catálogo</a></li>
+      <li><a routerLink="/mis-pedidos" routerLinkActive="activo" ariaCurrentWhenActive="page">Mis pedidos</a></li>
+    </ul>
+    <form class="busqueda" role="search" (submit)="buscar($event, q.value)">
+      <label for="busqueda-global" class="sr-only">Buscar productos</label>
+      <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <input #q id="busqueda-global" type="search" placeholder="Buscar productos" />
+    </form>
+    <a routerLink="/checkout" class="carrito" [attr.aria-label]="'Carrito, ' + carrito.unidades() + ' artículos'">
+      <svg aria-hidden="true" viewBox="0 0 24 24" width="22" height="22"><path d="M3 4h2l2.4 11h10.2L20 7H6.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><circle cx="9" cy="19.5" r="1.5" fill="currentColor"/><circle cx="17" cy="19.5" r="1.5" fill="currentColor"/></svg>
+      @if (carrito.unidades()) { <span class="contador" aria-hidden="true">{{ carrito.unidades() }}</span> }
+    </a>
+    @if (sesion.usuario(); as u) {
+      <div class="usuario">
+        <span class="avatar" aria-hidden="true">{{ u.nombre.charAt(0).toUpperCase() }}</span>
+        <span class="nombre-usuario">{{ u.nombre }}</span>
+        <button type="button" class="salir" (click)="salir()">Cerrar sesión</button>
+      </div>
+    } @else {
+      <a routerLink="/acceso" class="btn btn-primario entrar">Iniciar sesión</a>
+    }
+  </nav>
+</header>
+<main id="contenido" class="contenedor principal" tabindex="-1">
+  <router-outlet />
+</main>
+<footer class="contenedor pie muted">© 2026 Nébula · Proyecto académico. Pagos y envíos simulados.</footer>
