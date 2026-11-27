@@ -91,6 +91,69 @@ services:
       timeout: 5s
       retries: 10
       start_period: 40s
+  api-usuarios:
+    image: tienda/api-usuarios:1.0.0
+
+    build:
+      context: ./api-usuarios
+      dockerfile: Dockerfile
+
+    restart: unless-stopped
+
+    environment:
+      APP_NAME: api-usuarios
+      APP_ENV: production
+      APP_KEY: ${USUARIOS_APP_KEY:?Required}
+      APP_DEBUG: "false"
+      APP_URL: http://localhost:8001
+      APP_TIMEZONE: UTC
+
+      APP_LOCALE: es
+      APP_FALLBACK_LOCALE: es
+      APP_FAKER_LOCALE: es_MX
+
+      LOG_CHANNEL: stderr
+      LOG_LEVEL: warning
+
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: db_usuarios
+      DB_USERNAME: usr_usuarios
+      DB_PASSWORD: ${POSTGRES_USUARIOS_PASSWORD:?Required}
+
+      SESSION_DRIVER: array
+      CACHE_STORE: file
+      QUEUE_CONNECTION: sync
+      FILESYSTEM_DISK: local
+
+      HASH_DRIVER: argon2id
+      ARGON_MEMORY: 65536
+      ARGON_THREADS: 1
+      ARGON_TIME: 4
+
+      JWT_ISSUER: api-usuarios
+      JWT_AUDIENCE: tienda-microservicios
+      JWT_TTL_SECONDS: 3600
+      JWT_PRIVATE_KEY_PATH: /run/secrets/jwt-private.pem
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt-public.pem
+
+      CORS_ALLOWED_ORIGINS: ""
+
+    ports:
+      - "127.0.0.1:${USUARIOS_HOST_PORT:-8001}:8001"
+
+    volumes:
+      - ./api-usuarios/storage/keys/jwt-private.pem:/run/secrets/jwt-private.pem:ro
+      - ./api-usuarios/storage/keys/jwt-public.pem:/run/secrets/jwt-public.pem:ro
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    networks:
+      - red-tienda
+
 
 networks:
   red-tienda:

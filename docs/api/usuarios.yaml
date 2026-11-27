@@ -1,8 +1,13 @@
 openapi: 3.0.3
 info:
   title: API usuarios
-  version: 1.0.0
-  description: PHP / Laravel / PostgreSQL | Contrato inicial propuesto y aprobado a nivel de arquitectura.
+  version: 1.1.0
+  description: >-
+    Microservicio REST de usuarios y autenticacion.
+    PHP 8.5, Laravel 13 y PostgreSQL 17.
+    Autenticacion JWT RS256 y hashing Argon2id.
+    Registro publico exclusivo para clientes.
+    Limite de peticiones de 256 KiB.
 servers:
 - url: http://localhost:8001
   description: Desarrollo individual
@@ -14,7 +19,13 @@ paths:
   /api/usuarios/registro:
     post:
       summary: Registrar cliente
-      description: Público. Correo único normalizado; rol siempre cliente; nunca retornar hash.
+      description: >-
+        Registro publico de clientes.
+        Correo unico normalizado.
+        El rol siempre sera cliente.
+        No se permiten propiedades adicionales.
+        La contrasena se almacena mediante Argon2id.
+        Limite de 5 solicitudes por minuto por IP.
       operationId: usuarios_1
       security: []
       responses:
@@ -88,6 +99,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '413':
+          description: El cuerpo de la peticion supera 256 KiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: Validación
           content:
@@ -126,6 +143,7 @@ paths:
                 correo:
                   type: string
                   format: email
+                  maxLength: 254
                 contrasena:
                   type: string
                   minLength: 8
@@ -138,7 +156,13 @@ paths:
   /api/usuarios/login:
     post:
       summary: Iniciar sesión
-      description: 'Público. Credenciales inválidas: 401 genérico; limitar intentos.'
+      description: >-
+        Inicio de sesion publico mediante correo y contrasena.
+        Credenciales invalidas devuelven HTTP 401 generico.
+        Emite JWT RS256 con vigencia de 3600 segundos.
+        Emisor api-usuarios y audiencia tienda-microservicios.
+        Limite de 5 solicitudes por minuto por IP
+        y 5 solicitudes por minuto por correo.
       operationId: usuarios_2
       security: []
       responses:
@@ -209,6 +233,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '413':
+          description: El cuerpo de la peticion supera 256 KiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: Validación
           content:
@@ -243,8 +273,11 @@ paths:
                 correo:
                   type: string
                   format: email
+                  maxLength: 254
                 contrasena:
                   type: string
+                  minLength: 1
+                  maxLength: 128
               required:
               - correo
               - contrasena
@@ -252,7 +285,12 @@ paths:
   /api/usuarios/{id}:
     get:
       summary: Consultar perfil
-      description: JWT del titular o admin. Solo titular o admin.
+      description: >-
+        Requiere JWT valido.
+        Solo el titular o un administrador puede consultar el perfil.
+        Limite de 300 solicitudes por minuto por IP
+        y 120 solicitudes por minuto por usuario autenticado.
+        No devuelve contrasenas ni hashes.
       operationId: usuarios_3
       security:
       - bearerAuth: []
@@ -302,6 +340,12 @@ paths:
                 $ref: '#/components/schemas/Error'
         '409':
           description: Conflicto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          description: El cuerpo de la peticion supera 256 KiB
           content:
             application/json:
               schema:

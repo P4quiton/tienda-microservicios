@@ -1,0 +1,40 @@
+
+services:
+  postgres-test:
+    image: postgres:17-alpine
+
+    restart: "no"
+
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${TEST_POSTGRES_PASSWORD:?Required}
+      POSTGRES_DB: db_usuarios_test
+      POSTGRES_INITDB_ARGS: "--auth-local=scram-sha-256 --auth-host=scram-sha-256"
+
+      TEST_DB_PASSWORD: ${DB_PASSWORD:?Required}
+
+    ports:
+      - "127.0.0.1:15433:5432"
+
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+      - ./tests/infrastructure/postgres/01-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - PGPASSWORD="$$TEST_DB_PASSWORD" psql -h 127.0.0.1 -U usr_usuarios_test -d db_usuarios_test -v ON_ERROR_STOP=1 -c "SELECT 1" > /dev/null
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+    networks:
+      - usuarios-test-network
+
+volumes:
+  postgres_test_data:
+
+networks:
+  usuarios-test-network:
+    driver: bridge
