@@ -18,6 +18,14 @@ Orden: lee el carrito (versión entera) -> **persiste el pedido pendiente con su
 
 Solo hay un checkout activo por usuario (índice único parcial en PostgreSQL). Las claves por operación son estables (`Pedido::clave()`): Inventario reservar y Pagos usan el id del pedido; el resto, un UUIDv5 derivado de él. El avance de cada paso, los intentos, el próximo intento y el último error se guardan en `pedidos`.
 
+### Campos del pedido
+
+La creación (201), el historial, el detalle y el PATCH de estado incluyen siempre estos campos:
+
+- `guia` contiene la guía de Envíos o `null` hasta que se genere.
+- `pago_id` contiene el UUID del resultado definitivo de Pagos, aprobado o rechazado. Se guarda con el avance de la compra, incluso al recuperar el comprobante. Queda en `null` mientras falte el resultado, cuando la compra termina antes de pagar y en pedidos previos a la migración sin comprobante registrado.
+- `metodo_pago` contiene el método elegido al crear el pedido, `tarjeta_simulada` o `transferencia_simulada`.
+
 ### Recuperación sin cliente
 
 `php artisan pedidos:recuperar [--limite=50]` reanuda los pasos pendientes con las mismas claves, respetando el backoff (5 s duplicando hasta 300 s) y un bloqueo advisory por usuario. Está en el scheduler (`routes/console.php`, cada minuto). La imagen lo ejecuta al arrancar y deja `php artisan schedule:work` en segundo plano; fuera de Docker, programa `* * * * * php artisan schedule:run`. El scheduler usa `CACHE_STORE=file`. Los pedidos que siguen fallando se conservan con `ultimo_error` para revisión; no hay reembolso ni expiración de reservas (MVP).

@@ -6,6 +6,7 @@ use App\Pedidos\Pedido;
 use Firebase\JWT\JWT;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\Support\ServiciosFalsos;
 use Tests\TestCase;
@@ -347,8 +348,21 @@ final class QaHostilTest extends TestCase
         $clave = (string) Str::uuid();
         try {
             $primera = $this->crear($this->cuerpoValido(), $clave, $token)->assertStatus(201);
+            $primera->assertJsonPath('data.estado', 'pagado')
+                ->assertJsonPath('data.guia', 'GUIA-FICTICIA')
+                ->assertJsonPath('data.pago_id', $servicios->pagoId)
+                ->assertJsonPath('data.metodo_pago', 'tarjeta_simulada');
             $segunda = $this->crear($this->cuerpoValido(), strtoupper($clave), $token)->assertStatus(201);
             $this->assertSame($primera->json('data.id'), $segunda->json('data.id'));
+            $segunda->assertExactJson($primera->json());
+            $id = $primera->json('data.id');
+            $this->withToken($token)->getJson("/api/pedidos/$id")
+                ->assertOk()->assertExactJson($primera->json());
+            $this->withToken($token)->getJson("/api/pedidos/usuario/$usuario")
+                ->assertOk()->assertExactJson(array_replace($primera->json(), ['data' => [$primera->json('data')]]));
+            $otroToken = $this->jwt($this->claims());
+            $this->withToken($otroToken)->getJson("/api/pedidos/$id")->assertStatus(403);
+            $this->withToken($otroToken)->getJson("/api/pedidos/usuario/$usuario")->assertStatus(403);
             $this->assertSame(1, Pedido::where('usuario_id', $usuario)->count());
             $this->assertSame(1, $servicios->cuenta('pagos.procesar'));
             $this->assertSame(1, $servicios->cuenta('envios.generar'));
@@ -456,7 +470,11 @@ final class QaHostilTest extends TestCase
         $token = $this->jwt($this->claims([], $usuario));
         try {
             $this->crear($this->cuerpoValido(), null, $token)
-                ->assertStatus(201)->assertJsonPath('data.estado', 'cancelado');
+                ->assertStatus(201)->assertJsonPath('data.estado', 'cancelado')
+                ->assertJsonStructure(['data' => ['guia']])
+                ->assertJsonPath('data.pago_id', $servicios->pagoId)
+                ->assertJsonPath('data.guia', null)
+                ->assertJsonPath('data.metodo_pago', 'tarjeta_simulada');
             $this->assertSame(1, $servicios->cuenta('inventario.liberar'));
             $this->assertSame(1, $servicios->cuenta('carrito.liberar'));
 
@@ -475,7 +493,85 @@ final class QaHostilTest extends TestCase
         }
     }
 
+    public function test_conflictos_antes_del_pago_exponen_guia_y_pago_id_nulos(): void
+    {
+        $this->postgres();
+        foreach (['sin_stock', 'carrito_desactualizado'] as $paso) {
+            $servicios = ServiciosFalsos::nuevo()->instalar();
+            $usuario = $servicios->usuario;
+            $servicios->sinStock = $paso === 'sin_stock';
+            if ($paso === 'carrito_desactualizado') {
+                $servicios->antes['carrito.iniciar'] = fn () => $servicios->version++;
+            }
+            $token = $this->jwt($this->claims([], $usuario));
+            $cuerpo = array_replace($this->cuerpoValido(), ['metodo_pago' => 'transferencia_simulada']);
+            try {
+                $this->crear($cuerpo, null, $token)->assertStatus(409);
+                $pedido = Pedido::where('usuario_id', $usuario)->sole();
+                $this->assertSame($paso, $pedido->paso);
+                $detalle = $this->withToken($token)->getJson("/api/pedidos/{$pedido->id}")
+                    ->assertOk()
+                    ->assertJsonStructure(['data' => ['pago_id', 'guia']])
+                    ->assertJsonPath('data.estado', 'cancelado')
+                    ->assertJsonPath('data.pago_id', null)
+                    ->assertJsonPath('data.guia', null)
+                    ->assertJsonPath('data.metodo_pago', 'transferencia_simulada');
+                $this->withToken($token)->getJson("/api/pedidos/usuario/$usuario")
+                    ->assertOk()->assertExactJson(array_replace($detalle->json(), ['data' => [$detalle->json('data')]]));
+            } finally {
+                Pedido::where('usuario_id', $usuario)->delete();
+            }
+        }
+    }
+
+    public function test_pedido_pagado_antes_de_generar_guia_expone_el_pago_y_guia_nula(): void
+    {
+        $this->postgres();
+        $servicios = ServiciosFalsos::nuevo()->instalar();
+        $usuario = $servicios->usuario;
+        $token = $this->jwt($this->claims([], $usuario));
+        $servicios->fallos['envios.generar'] = [503];
+        try {
+            $this->crear($this->cuerpoValido(), null, $token)->assertStatus(503);
+            $pedido = Pedido::where('usuario_id', $usuario)->sole();
+            $this->assertSame('por_generar_guia', $pedido->paso);
+            $this->withToken($token)->getJson("/api/pedidos/{$pedido->id}")
+                ->assertOk()
+                ->assertJsonStructure(['data' => ['guia']])
+                ->assertJsonPath('data.estado', 'pagado')
+                ->assertJsonPath('data.pago_id', $servicios->pagoId)
+                ->assertJsonPath('data.guia', null)
+                ->assertJsonPath('data.metodo_pago', 'tarjeta_simulada');
+        } finally {
+            Pedido::where('usuario_id', $usuario)->delete();
+        }
+    }
+
     // ---------- migraciones ----------
+
+    public function test_migracion_de_pago_id_agrega_uuid_nulo_y_revierte_solo_la_columna(): void
+    {
+        $this->postgres();
+        $columna = fn () => DB::table('information_schema.columns')
+            ->whereRaw('table_schema = current_schema()')
+            ->where('table_name', 'pedidos')
+            ->where('column_name', 'pago_id')
+            ->first(['data_type', 'is_nullable']);
+
+        $definicion = $columna();
+        $this->assertNotNull($definicion);
+        $this->assertSame('uuid', $definicion->data_type);
+        $this->assertSame('YES', $definicion->is_nullable);
+        try {
+            $this->assertSame(0, Artisan::call('migrate:rollback', ['--step' => 1]));
+            $this->assertNull($columna());
+            $this->assertTrue(Schema::hasColumn('pedidos', 'guia'));
+            $this->assertTrue(Schema::hasColumn('pedidos', 'snapshot'));
+        } finally {
+            $this->assertSame(0, Artisan::call('migrate'));
+        }
+        $this->assertEquals($definicion, $columna());
+    }
 
     public function test_migraciones_son_repetibles_y_reversibles(): void
     {

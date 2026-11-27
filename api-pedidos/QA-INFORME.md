@@ -128,3 +128,17 @@ Ajuste justificado: `QaHostilTest::test_cuerpo_enorme_se_rechaza` esperaba 422 y
 - `withoutOverlapping`/`onOneServer` con caché de archivo no coordinan hosts distintos; la protección real es el advisory lock por usuario.
 - Tras un proxy, `request->ip()` es la IP del proxy salvo que se configuren proxies de confianza (no configurado): los anónimos compartirían cubo.
 - Las claves de idempotencia crecen sin límite (MVP).
+
+## Cambios solicitados por el integrante 1 (pago_id, guia, metodo_pago)
+
+En PostgreSQL 17.12 temporal, con el rol `usr_pedidos` sin privilegios de superusuario, creación de bases, creación de roles ni replicación y con el acceso de `PUBLIC` a la base revocado, se ejecutó PHPUnit con PHP 8.5.13 y dobles HTTP. Se reutilizó un `vendor` local verificado contra el mismo `composer.lock` porque la ruta indicada en `/dev/shm` no estaba disponible.
+
+| Momento | Resultado |
+|---|---|
+| Antes del cambio | 60 pruebas y 530 aserciones aprobadas |
+| Primera ejecución con cambios | 1 fallo en 65 pruebas al comparar el orden de las claves de objetos JSON que PostgreSQL devuelve desde columnas `jsonb`. Se ajustó la prueba para exigir igualdad del JSON sin depender de ese orden. |
+| Después del ajuste | 65 pruebas y 615 aserciones aprobadas |
+
+Se verificaron las respuestas de creación, detalle, historial y PATCH, la titularidad, la idempotencia, los conflictos previos al pago, la guía pendiente, el rechazo y la recuperación por comprobante. La prueba de migración comprobó el tipo `uuid` nullable, la reversión de la columna y su reaplicación. Pasaron `php -l` en los archivos PHP modificados y el parseo de `docs/api/pedidos.yaml` con PyYAML. Solo se detuvo el contenedor PostgreSQL temporal de esta tarea.
+
+**NO VERIFICADO**. Integración con servicios reales y despliegue. No se ejecutó `git diff`, Git ni `docker build`. La comparación SHA-256 de los otros contratos detectó un cambio concurrente en `docs/api/envios.yaml`, fuera de esta intervención. Los demás conservaron su hash inicial.

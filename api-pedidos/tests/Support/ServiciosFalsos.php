@@ -33,6 +33,8 @@ final class ServiciosFalsos
 
     public string $pago = 'aprobado';
 
+    public string $pagoId;
+
     public bool $sinStock = false;
 
     /** Si no es null, GET /api/pagos/pedido/{id} devuelve este estado; si es null, 404. */
@@ -40,7 +42,10 @@ final class ServiciosFalsos
 
     public ?string $archivo = null;
 
-    public function __construct(public string $usuario, public string $producto, public string $linea) {}
+    public function __construct(public string $usuario, public string $producto, public string $linea)
+    {
+        $this->pagoId = (string) Str::uuid();
+    }
 
     public static function nuevo(?string $usuario = null): self
     {
@@ -139,10 +144,10 @@ final class ServiciosFalsos
             'inventario.reservar' => $this->sinStock ? 409 : $id + ['items' => $cuerpo['items'] ?? [], 'estado' => 'reservada'],
             'inventario.confirmar' => $id + ['items' => [], 'estado' => 'confirmada'],
             'inventario.liberar' => $id + ['items' => [], 'estado' => 'liberada'],
-            'pagos.procesar' => $id + ['id' => (string) Str::uuid(), 'monto' => $cuerpo['monto'] ?? null,
+            'pagos.procesar' => $id + ['id' => $this->pagoId, 'monto' => $cuerpo['monto'] ?? null,
                 'metodo_pago' => $cuerpo['metodo_pago'] ?? null, 'estado' => $this->pago, 'creado_en' => now()->toISOString()],
             'pagos.consultar' => $this->pagoConsultable === null ? 404 : [
-                'id' => (string) Str::uuid(), 'pedido_id' => basename(parse_url($peticion->url(), PHP_URL_PATH)),
+                'id' => $this->pagoId, 'pedido_id' => basename(parse_url($peticion->url(), PHP_URL_PATH)),
                 'monto' => '9.00', 'metodo_pago' => 'tarjeta_simulada', 'estado' => $this->pagoConsultable,
                 'creado_en' => now()->toISOString(),
             ],

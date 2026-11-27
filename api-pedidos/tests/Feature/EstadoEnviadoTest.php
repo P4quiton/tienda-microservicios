@@ -66,9 +66,13 @@ final class EstadoEnviadoTest extends TestCase
         $this->postgres();
         $pedido = $this->pedido('pagado');
         try {
+            $pedido->update(['guia' => 'GUIA-FICTICIA', 'pago_id' => (string) Str::uuid()]);
             $clave = (string) Str::uuid();
             $this->parchear($pedido->id, ['estado' => 'enviado'], $this->tokenEnvios, $clave)
-                ->assertOk()->assertJsonPath('data.estado', 'enviado')->assertJsonPath('data.id', $pedido->id);
+                ->assertOk()->assertJsonPath('data.estado', 'enviado')->assertJsonPath('data.id', $pedido->id)
+                ->assertJsonPath('data.guia', $pedido->guia)
+                ->assertJsonPath('data.pago_id', $pedido->pago_id)
+                ->assertJsonPath('data.metodo_pago', 'tarjeta_simulada');
             $this->assertSame('enviado', $pedido->fresh()->estado);
             // Misma clave y otra clave: 200 sin nuevo efecto.
             $this->parchear($pedido->id, ['estado' => 'enviado'], $this->tokenEnvios, $clave)->assertOk()->assertJsonPath('data.estado', 'enviado');

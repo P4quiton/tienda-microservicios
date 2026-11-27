@@ -228,13 +228,7 @@ final class Compra
 
         if ($pedido->paso === 'por_pagar') {
             // Paso persistido = intención de pago; la clave (id del pedido) es estable aunque se pierda la respuesta.
-            $pago = $this->resolverPago($pedido);
-            if ($pago['estado'] === 'aprobado') {
-                // Desde aquí el pedido está cobrado: nunca se cancela.
-                $this->avanzar($pedido, ['paso' => 'por_confirmar_reserva', 'estado' => 'pagado']);
-            } else {
-                $this->avanzar($pedido, ['paso' => 'por_liberar_reserva', 'estado' => 'cancelado']);
-            }
+            $this->registrarPago($pedido);
         }
 
         if ($pedido->paso === 'por_liberar_reserva') {
@@ -316,12 +310,23 @@ final class Compra
         return ['items' => $items, 'costo_envio' => $this->decimal($costoEnvio), 'total' => $this->decimal($total)];
     }
 
+    /** Persiste el comprobante definitivo junto con el estado y el siguiente paso. */
+    private function registrarPago(Pedido $pedido): void
+    {
+        $pago = $this->resolverPago($pedido);
+        $cambios = $pago['estado'] === 'aprobado'
+            ? ['paso' => 'por_confirmar_reserva', 'estado' => 'pagado']
+            : ['paso' => 'por_liberar_reserva', 'estado' => 'cancelado'];
+
+        $this->avanzar($pedido, $cambios + ['pago_id' => $pago['id']]);
+    }
+
     /**
      * Procesa el pago con clave estable. Ante un resultado ambiguo consulta GET /api/pagos/pedido/{id};
      * si tampoco hay comprobante, se conserva 503 (404 no prueba que no haya operación en curso) y se
      * reintenta después con la misma clave y payload. Jamás se asume rechazo.
      *
-     * @return array{estado: string}
+     * @return array{id: string, estado: string}
      */
     private function resolverPago(Pedido $pedido): array
     {
@@ -349,12 +354,19 @@ final class Compra
 
     private function pagoValido(array $pago, Pedido $pedido): array
     {
-        if (($pago['pedido_id'] ?? null) !== $pedido->id || ($pago['monto'] ?? null) !== $pedido->total
+        $id = $pago['id'] ?? null;
+        if (!Str::isUuid($id)
+            || ($pago['pedido_id'] ?? null) !== $pedido->id || ($pago['monto'] ?? null) !== $pedido->total
             || !in_array($pago['estado'] ?? null, ['aprobado', 'rechazado'], true)) {
             throw new ApiError(503, 'Resultado de pago incierto');
         }
 
-        return $pago;
+        $id = strtolower($id);
+        if ($pedido->pago_id !== null && $pedido->pago_id !== $id) {
+            throw new ApiError(503, 'El comprobante no coincide con el pago registrado');
+        }
+
+        return ['id' => $id, 'estado' => $pago['estado']];
     }
 
     /** Persiste el avance con comparación del paso previo y limpia el rastro de fallos. */
@@ -365,6 +377,7 @@ final class Compra
         $columnas = array_map(fn ($valor) => is_array($valor) ? json_encode($valor, JSON_THROW_ON_ERROR) : $valor, $cambios);
         $actualizados = Pedido::whereKey($pedido->id)
             ->where('paso', $pedido->paso)
+            ->when(isset($cambios['pago_id']), fn ($consulta) => $consulta->where('pago_id', $pedido->pago_id))
             ->update($columnas);
 
         if ($actualizados !== 1) {

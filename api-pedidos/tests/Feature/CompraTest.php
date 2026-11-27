@@ -316,10 +316,63 @@ final class CompraTest extends TestCase
         try {
             $pedido = $this->ejecutar($s);
             $this->assertSame('pagado', $pedido->estado);
+            $this->assertSame($s->pagoId, $pedido->fresh()->pago_id);
             $this->assertSame(1, $s->cuenta('pagos.procesar'));
             $this->assertSame(1, $s->cuenta('pagos.consultar'));
             $this->assertSame(0, $s->cuenta('inventario.liberar'));
             $this->assertSame(1, $s->cuenta('envios.generar'));
+        } finally {
+            Pedido::where('usuario_id', $s->usuario)->delete();
+        }
+    }
+
+    public function test_comando_recupera_un_pago_definitivo_desde_el_comprobante(): void
+    {
+        $s = $this->servicios();
+        $s->fallos['pagos.procesar'] = [503, 503];
+        try {
+            $this->esperar503(fn () => $this->ejecutar($s));
+            $pedido = Pedido::where('usuario_id', $s->usuario)->sole();
+            $this->assertNull($pedido->pago_id);
+
+            $s->pagoConsultable = 'rechazado';
+            $this->vencer($pedido);
+            $this->assertSame(0, Artisan::call('pedidos:recuperar'));
+            $pedido->refresh();
+            $this->assertSame('terminado', $pedido->paso);
+            $this->assertSame('cancelado', $pedido->estado);
+            $this->assertSame($s->pagoId, $pedido->pago_id);
+            $this->assertNull($pedido->guia);
+            $this->assertSame(2, $s->cuenta('pagos.consultar'));
+        } finally {
+            Pedido::where('usuario_id', $s->usuario)->delete();
+        }
+    }
+
+    public function test_comprobante_invalido_o_distinto_no_avanza_ni_sobrescribe_el_pago(): void
+    {
+        $s = $this->servicios();
+        $s->pagoId = 'no-es-uuid';
+        $s->pagoConsultable = 'aprobado';
+        try {
+            $this->esperar503(fn () => $this->ejecutar($s));
+            $pedido = Pedido::where('usuario_id', $s->usuario)->sole();
+            $this->assertSame('por_pagar', $pedido->paso);
+            $this->assertNull($pedido->pago_id);
+
+            $pagoRegistrado = (string) Str::uuid();
+            $pedido->update(['pago_id' => $pagoRegistrado]);
+            $s->pagoId = (string) Str::uuid();
+            $this->esperar503(fn () => $this->ejecutar($s));
+            $pedido->refresh();
+            $this->assertSame('por_pagar', $pedido->paso);
+            $this->assertSame($pagoRegistrado, $pedido->pago_id);
+            $this->assertSame(0, $s->cuenta('inventario.confirmar'));
+            $this->assertSame(0, $s->cuenta('inventario.liberar'));
+
+            $s->pagoId = strtoupper($pagoRegistrado);
+            $this->assertSame($pagoRegistrado, $this->ejecutar($s)->pago_id);
+            $this->assertSame('terminado', $pedido->fresh()->paso);
         } finally {
             Pedido::where('usuario_id', $s->usuario)->delete();
         }

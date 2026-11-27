@@ -61,6 +61,9 @@ final class Pedido extends Model
             'costo_envio' => $this->costo_envio ?? '0.00',
             'total' => $this->total ?? '0.00',
             'estado' => $this->estado,
+            'guia' => $this->guia,
+            'pago_id' => $this->pago_id,
+            'metodo_pago' => $this->metodo_pago,
             'creado_en' => $this->creado_en->toISOString(),
         ];
     }
