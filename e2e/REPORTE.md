@@ -1,8 +1,10 @@
-# Reporte E2E (corrida real del 2026-11-26)
+# Reporte E2E (corrida real del 2026-11-26/27)
 
-Comando: `./e2e/run.sh` (197 s, codigo de salida 0). Salida completa en [`ultima-salida.log`](ultima-salida.log). Los escenarios 1-12 dieron 10/12 OK en la primera corrida historica (hallazgos abajo) y 12/12 despues. La ampliacion 11/13/14/15 se ejecuto el 2026-11-26: primera corrida con 3 FALLA del propio test (el escenario 11 consultaba el rastreo HTTP con Pedidos caido, que no responde porque Envios consulta a Pedidos para la titularidad; ese error dejo Pedidos apagado y rompio 12, y a Envios con despacho a 8 s, lo que cambio el estado final en 13); corregido el test, corrida final **15/15 OK**. No se encontraron bugs de servicio nuevos; no se modifico ningun `api-*`.
+Comando: `./e2e/run.sh` (289 s). Salida completa en [`ultima-salida.log`](ultima-salida.log). Resultado final: **17/17 OK** (escenarios 1-14 y 15 sin cambios; 16 y 17 nuevos). Los escenarios 1-12 dieron 10/12 OK en la primera corrida historica (hallazgos abajo) y 12/12 despues.
 
-Fases: escenarios 1-14 con `RATE_LIMIT_*=100000` y `ENVIOS_DESPACHO_SEGUNDOS=3600` (para que Envios no despache solo fuera de los escenarios 11 y 14); el 15 reinicia los 4 servicios SIN variables de limite (valores por defecto). Los escenarios 11 y 14 reinician Envios con su propia configuracion de despacho.
+Historial de la ampliacion 16/17: una primera corrida fallo por defectos del propio test (comparaba el total global del outbox mientras Envios despachaba guias antiguas al reiniciar; 5 compras simultaneas saturaban los 4 workers PHP del Pedidos de pruebas, que recibe llamadas de vuelta de Pagos => 503). Tambien en esa corrida el escenario 15 fallo una vez en Pagos (130 GET autenticados => todos 404, ningun 429); no se reprodujo en la corrida siguiente y no se identifico la causa (el limitador de Pagos es de ventana fija por proceso, `RateLimiter.java`); queda como **observacion no explicada**. No se encontraron bugs de servicio nuevos; no se modifico ningun `api-*`.
+
+Fases: escenarios 1-14, 16 y 17 con `RATE_LIMIT_*=100000`, `ENVIOS_DESPACHO_SEGUNDOS=3600` y `ENVIOS_ENTREGA_SEGUNDOS=3600` (Envios no despacha ni entrega solo fuera de los escenarios 11, 14 y 17); el 15 (ultimo en correr) reinicia los 4 servicios SIN variables de limite (valores por defecto). Los escenarios 11 y 14 reinician Envios con su propia configuracion de despacho.
 
 ## Resultado por escenario (corrida final)
 
@@ -23,6 +25,8 @@ Fases: escenarios 1-14 con `RATE_LIMIT_*=100000` y `ENVIOS_DESPACHO_SEGUNDOS=360
 | 13 | Scheduler de Pedidos (`schedule:work`, CMD del Dockerfile leido del archivo) | OK | Carrito rechaza `/finalizar` => 503, pedido `pagado`, carrito con 2 unidades; Carrito `kill -9` + reinicio; sin tocar nada el carrito queda vacio en 58 s (limite 110 s); el log del contenedor muestra `Running ['artisan' pedidos:recuperar] ... DONE` (19:02:00). 1 pago `aprobado` (total de pagos +1), 1 guia, reserva `confirmada`, stock 20->18 una vez; repetir la clave => 201 mismo pedido `pagado`, sigue 1 pago/1 guia |
 | 14 | Despacho automatico de Envios (3 s, barrido 1 s, notificador 1 s) | OK | sin tocar nada: rastreo `en_transito` a 3.5 s de la compra, pedido `enviado` de inmediato, outbox 1 fila `enviada`. Repetir `/generar` y esperar 6 s => 1 guia, 1 fila, rastreo `en_transito`, pedido `enviado`. Dos compras simultaneas: ambas `enviado` en 3.7 s con 1 fila cada una |
 | 15 | Limites por defecto | OK | 6 POST `/api/pedidos` del mismo usuario: `[201, 409, 409, 409, 409, 429]`, `Retry-After: 60`. Cuerpo de 300 KiB => 413 en Carrito, Pedidos, Pagos y Envios (con credencial; sin credencial => 401; 200 KiB no da 413). 130 `/health` + 130 `/ready` por servicio => solo 200 y no consumen cupo. 130 GET autenticados por servicio: primer 429 exactamente en el 121, con `Retry-After` 53-60; sin credencial 401; `/health` 200 con el usuario saturado |
+| 16 | Campos del pedido por HTTP (`guia`, `pago_id`, `metodo_pago`) | OK | (i) 201, GET detalle y historial: `guia` ENV... (= guia de la BD de Envios, y rastreable por el cliente => `preparando`), `pago_id` uuid v4 = `GET /api/pagos/pedido/{id}.data.id`, `tarjeta_simulada`, `pagado`; BD de Pedidos igual. (iv) misma clave => mismo cuerpo, 1 pago, 1 guia. (v) otro cliente 403 (sin `pago_id` ni guia en el cuerpo) en detalle e historial; admin 200 con los tres campos. (vi) PATCH pagado->enviado (token de Envios) 200 con los tres campos intactos. (ii) `transferencia_simulada`: 201 `cancelado`, `pago_id` = comprobante `rechazado`, `guia` null. (iii) stock insuficiente: 409; historial/detalle `cancelado`, `pago_id` null, `guia` null, `metodo_pago` presente; BD igual. (vii) cobro hecho + respuesta y consulta perdidas => 503, pedido `pendiente` con `pago_id` null; Pagos `kill -9` + reinicio + `pedidos:recuperar` ("completados 1") => `pagado`, `pago_id` = comprobante, 1 pago, guia presente; repetir clave => mismo pedido y campos |
+| 17 | Entrega automatica de Envios | OK | (A) rastreo observado `preparando@0.0 s, en_transito@3.4 s, entregado@6.3 s`; la BD audita exactamente 2 UPDATE (`preparando>en_transito`, `en_transito>entregado`); `despachado_en` persistido; entrega a 3.0 s de `despachado_en`; pedido `enviado` (nunca `entregado`) y tras 6 s mas; outbox 1 fila `enviada` y +1 fila global (16 -> 17 -> 17); `/generar` repetido => misma guia, 1 guia, 2 transiciones. (B) 2a instancia en 8013 (misma BD): 3 compras simultaneas `entregado` en 6.7 s, cada envio con exactamente 2 UPDATE, outbox 1 `enviada` cada uno, ambas instancias dan el mismo rastreo. (C) `ENVIOS_ENTREGA_SEGUNDOS=60`: 15.6 s tras el despacho sigue `en_transito`. (D) `kill -9` tras el despacho, plazo (12 s) vencido con el servicio apagado (BD sigue `en_transito`), al reiniciar entrega en 0.7 s sin intervencion; pedido `enviado` |
 
 ## Bugs de servicio corregidos (con regresion)
 
@@ -35,7 +39,10 @@ Fases: escenarios 1-14 con `RATE_LIMIT_*=100000` y `ENVIOS_DESPACHO_SEGUNDOS=360
 
 ## Observaciones / ambiguedades del contrato (no modificadas)
 
-- **El pedido no expone la guia** (`pedidos.yaml`) y Envios solo rastrea por guia: un cliente no puede descubrirla por HTTP. El E2E la lee de la BD de Envios. Conviene definirlo.
+- **La guia ya es descubrible por HTTP**: el pedido la devuelve (`guia`), el cliente rastrea con ella (escenario 16). Sustituye la observacion anterior; el E2E sigue leyendo la guia de la BD de Envios solo para contrastarla.
+- **`entregado` no llega a Pedidos** (por diseno de la entrega): el pedido permanece `enviado` aunque el rastreo diga `entregado`. El contrato de Pedidos no tiene estado `entregado`; el cliente debe consultar el rastreo.
+- **Evidencia de "una sola vez" con 2 instancias**: Envios no guarda fecha de entrega ni loguea a nivel INFO por defecto; la prueba instala un trigger de auditoria en el PG temporal. Con 3 compras y 2 instancias no hubo UPDATE duplicados; no prueba carga alta ni carreras raras (`SKIP LOCKED` esta cubierto por pruebas unitarias del servicio, no por este E2E).
+- **`POST /generar` tras la entrega** sigue devolviendo 201 con `estado: "preparando"` (resultado original persistido), mientras el rastreo da `entregado` (ver observacion previa).
 - **Disparador de despacho**: ahora es automatico (por tiempo desde la guia) y el E2E lo verifica sin invocar nada a mano. Sigue sin haber contrato HTTP para despachar o para fijar `ENVIOS_DESPACHO_SEGUNDOS`.
 - **`POST /generar` repetido despues del despacho** devuelve 201 con `estado: "preparando"` aunque el envio ya esta `en_transito` (el rastreo si da `en_transito`). La idempotencia devuelve la respuesta original; `envios.yaml` no dice si debe reflejar el estado actual. No modificado.
 - **Con Pedidos caido el rastreo de Envios no responde** (verifica titularidad consultando a Pedidos). El E2E lee el estado de la BD en ese tramo. Comportamiento de acoplamiento, no definido en el contrato.
@@ -46,6 +53,10 @@ Fases: escenarios 1-14 con `RATE_LIMIT_*=100000` y `ENVIOS_DESPACHO_SEGUNDOS=360
 
 ## No verificado
 
+- Recuperacion de `pago_id` por el scheduler (`schedule:work`) tras un pago incierto: el escenario 16(vii) usa `pedidos:recuperar` manual (el scheduler se probo aparte en el 13 con otro fallo).
+- Entrega automatica con varias instancias bajo carga alta, y con reloj de BD distinto al de las instancias.
+- Migracion `2026_11_26_000002` sobre datos previos (la BD del E2E nace vacia).
+- `node_modules` de Carrito: este arbol no lo trae; `run.sh` enlaza el del arbol `tienda/carrito` (mismas versiones de express/jose/pg) mientras corre.
 - Productos, Inventario y Usuarios reales (stubs / JWT firmados por la prueba).
 - Que el scheduler funcione con varias replicas de Pedidos (`onOneServer` con cache de archivo por instancia no coordina; solo se probo una instancia).
 - Limites `RATE_LIMIT_INTERNA_POR_MIN` (300) y `RATE_LIMIT_MUTACION_POR_MIN` (30) por defecto: solo se verificaron consulta (120) y checkout (5) y el tope de cuerpo.

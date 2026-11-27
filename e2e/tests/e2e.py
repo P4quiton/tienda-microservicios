@@ -7,6 +7,7 @@ Resultado por escenario: OK (todas las comprobaciones), FALLA, o NO VERIFICADO (
 import base64
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -26,7 +27,7 @@ PRIV = (TMP / "jwt-private.pem").read_text()
 PRIV_AJENA = (TMP / "jwt-private-ajena.pem").read_text()
 
 URL = {
-    "productos": "http://127.0.0.1:8002", "envios": "http://127.0.0.1:8003", "inventario": "http://127.0.0.1:8004",
+    "productos": "http://127.0.0.1:8002", "envios": "http://127.0.0.1:8003", "envios2": "http://127.0.0.1:8013", "inventario": "http://127.0.0.1:8004",
     "carrito": "http://127.0.0.1:8005", "pedidos": "http://127.0.0.1:8006", "pagos": "http://127.0.0.1:8007",
 }
 PROXY_PAGOS, PROXY_CARRITO = "http://127.0.0.1:8108", "http://127.0.0.1:8106"
@@ -740,6 +741,303 @@ def esc14(s):
     ok, t = esperar(lambda: all(pedido(x["id"], x["tok"]).data["estado"] == "enviado" for x in (c2, c3)), 40, 0.5)
     s.check(f"dos compras simultaneas se despachan solas ({t:.1f} s) con 1 fila de outbox cada una",
             ok and n_outbox(c2["id"]) == "1" and n_outbox(c3["id"]) == "1")
+    # Restaurar la fase 'altos' (despacho lento): los escenarios 16 y 17 no deben despachar a destiempo.
+    svc("restart", "envios", {"NOTIF_INTERVALO": "3"})
+
+
+def pedidos_db(pid, cols="pago_id, guia, metodo_pago, estado"):
+    """Fila del pedido en la BD de Pedidos (rol usr_pedidos), columnas separadas por '|'."""
+    return sql("db_pedidos", "usr_pedidos", "PW_PEDIDOS", f"select {cols} from pedidos where id='{pid}'")
+
+
+def campos_pedido(d):
+    return {k: (d or {}).get(k, "<AUSENTE>") for k in ("guia", "pago_id", "metodo_pago")}
+
+
+@escenario(16, "Campos del pedido (guia, pago_id, metodo_pago) por HTTP: creacion, detalle, historial, rechazo, 409, idempotencia, titularidad, PATCH, recuperacion")
+def esc16(s):
+    # (i) compra aprobada con tarjeta
+    uid, tok = nuevo_usuario()
+    p = nuevo_producto("25.00", 20)
+    agregar(uid, tok, p, 2)
+    clave = str(uuid.uuid4())
+    r = comprar(tok, clave)
+    d = r.data or {}
+    pid = d.get("id", "")
+    s.check("(i) POST => 201 estado pagado", r.status == 201 and d.get("estado") == "pagado", r)
+    comp = http("GET", f"{URL['pagos']}/api/pagos/pedido/{pid}", token=tok)
+    s.check("(i) Pagos: comprobante aprobado", comp.status == 200 and comp.data["estado"] == "aprobado", comp)
+    pago_id = (comp.data or {}).get("id")
+    guia_bd = guia_de(pid)
+    det = pedido(pid, tok)
+    hist = http("GET", f"{URL['pedidos']}/api/pedidos/usuario/{uid}", token=tok)
+    h = next((x for x in (hist.data or []) if x["id"] == pid), {})
+    for nombre, x in (("201", d), ("GET detalle", det.data), ("GET historial", h)):
+        s.check(f"(i) {nombre}: guia string no nulo, pago_id uuid v4 = id del comprobante de Pagos, metodo_pago tarjeta_simulada, estado pagado",
+                isinstance(x.get("guia"), str) and x["guia"] != "" and isinstance(x.get("pago_id"), str)
+                and re.match(UUID4, x["pago_id"]) is not None and x["pago_id"] == pago_id
+                and x.get("metodo_pago") == "tarjeta_simulada" and x.get("estado") == "pagado", campos_pedido(x))
+    s.check("(i) la guia del pedido coincide con la guia real de la BD de Envios", d.get("guia") == guia_bd, f"{d.get('guia')} vs {guia_bd}")
+    ra = http("GET", f"{URL['envios']}/api/envios/rastreo/{d.get('guia')}", token=tok)
+    s.check("(i) el cliente rastrea con la guia que le da el pedido (descubrible por HTTP) => 200 preparando",
+            ra.status == 200 and ra.data["estado"] == "preparando" and ra.data["pedido_id"] == pid, ra)
+    fila = pedidos_db(pid)
+    s.check("(i) BD de Pedidos: pago_id/guia/metodo/estado coinciden", fila == f"{pago_id}|{guia_bd}|tarjeta_simulada|pagado", fila)
+
+    # (iv) misma Idempotency-Key => mismo pedido y mismos campos
+    r2 = comprar(tok, clave)
+    s.check("(iv) repetir la misma clave => 201 con el MISMO pedido y los mismos guia/pago_id/metodo_pago",
+            r2.status == 201 and r2.data == d and campos_pedido(r2.data) == campos_pedido(d), campos_pedido(r2.data))
+    s.check("(iv) sigue 1 pago y 1 guia", pagos_db(f"pedido_id='{pid}'") == "1" and n_guias(pid) == "1")
+
+    # (v) titularidad
+    uidB, tokB = nuevo_usuario()
+    _, tokAdmin = nuevo_usuario("admin")
+    rb = pedido(pid, tokB)
+    s.check("(v) otro cliente no ve el pedido (403/404) y no recibe guia/pago_id en el cuerpo",
+            rb.status in (403, 404) and "pago_id" not in rb.text and d["guia"] not in rb.text, rb)
+    hb = http("GET", f"{URL['pedidos']}/api/pedidos/usuario/{uid}", token=tokB)
+    s.check("(v) otro cliente no ve el historial de A (403/404)", hb.status in (403, 404) and pago_id not in hb.text, hb)
+    ra_ = pedido(pid, tokAdmin)
+    s.check("(v) admin SI ve el pedido con los tres campos", ra_.status == 200 and campos_pedido(ra_.data) == campos_pedido(d), ra_)
+
+    # (vi) PATCH pagado -> enviado con el token de Envios devuelve los tres campos
+    pr = http("PATCH", f"{URL['pedidos']}/api/pedidos/{pid}/estado", {"estado": "enviado"}, idem(), service=ENV["T_ENVIOS_PEDIDOS"])
+    s.check("(vi) PATCH /estado pagado->enviado => 200 enviado con guia/pago_id/metodo_pago intactos",
+            pr.status == 200 and pr.data["estado"] == "enviado" and campos_pedido(pr.data) == campos_pedido(d), pr)
+
+    # (ii) pago rechazado con transferencia_simulada
+    uid2, tok2 = nuevo_usuario()
+    p2 = nuevo_producto("25.00", 20)
+    agregar(uid2, tok2, p2, 1)
+    r = comprar(tok2, str(uuid.uuid4()), metodo="transferencia_simulada")
+    d2 = r.data or {}
+    pid2 = d2.get("id", "")
+    comp2 = http("GET", f"{URL['pagos']}/api/pagos/pedido/{pid2}", token=tok2)
+    s.check("(ii) POST => 201 cancelado; Pagos: comprobante rechazado", r.status == 201 and d2.get("estado") == "cancelado"
+            and comp2.status == 200 and comp2.data["estado"] == "rechazado", f"{r} | {comp2}")
+    hist2 = http("GET", f"{URL['pedidos']}/api/pedidos/usuario/{uid2}", token=tok2)
+    for nombre, x in (("201", d2), ("GET detalle", pedido(pid2, tok2).data), ("GET historial", (hist2.data or [{}])[0])):
+        s.check(f"(ii) {nombre}: pago_id = comprobante rechazado (uuid v4), guia null, metodo transferencia_simulada, estado cancelado",
+                x.get("pago_id") == (comp2.data or {}).get("id") and re.match(UUID4, x.get("pago_id") or "") is not None
+                and x.get("guia") is None and x.get("metodo_pago") == "transferencia_simulada" and x.get("estado") == "cancelado",
+                campos_pedido(x))
+    s.check("(ii) BD de Pedidos: pago_id = comprobante, guia NULL", pedidos_db(pid2) == f"{comp2.data['id']}||transferencia_simulada|cancelado", pedidos_db(pid2))
+
+    # (iii) stock insuficiente
+    uid3, tok3 = nuevo_usuario()
+    p3 = nuevo_producto("25.00", 10)
+    agregar(uid3, tok3, p3, 5)
+    set_stock(p3, 3)
+    r = comprar(tok3, str(uuid.uuid4()))
+    s.check("(iii) POST => 409", r.status == 409, r)
+    hist3 = http("GET", f"{URL['pedidos']}/api/pedidos/usuario/{uid3}", token=tok3)
+    h3 = (hist3.data or [{}])[0]
+    s.check("(iii) historial: 1 pedido cancelado con pago_id null y guia null", hist3.status == 200 and len(hist3.data) == 1
+            and h3.get("estado") == "cancelado" and h3.get("pago_id") is None and h3.get("guia") is None, h3)
+    det3 = pedido(h3.get("id", ""), tok3)
+    s.check("(iii) detalle: cancelado, pago_id null, guia null, metodo_pago presente (tarjeta_simulada)",
+            det3.status == 200 and det3.data["estado"] == "cancelado" and det3.data["pago_id"] is None and det3.data["guia"] is None
+            and det3.data["metodo_pago"] == "tarjeta_simulada", det3)
+    s.check("(iii) BD de Pedidos: pago_id y guia NULL", pedidos_db(h3.get("id", "")) == "||tarjeta_simulada|cancelado", pedidos_db(h3.get("id", "")))
+
+    # (vii) recuperacion de un pago incierto: Pagos cobra, se pierden respuesta y consulta, Pagos muere
+    uid4, tok4 = nuevo_usuario()
+    p4 = nuevo_producto("25.00", 20)
+    agregar(uid4, tok4, p4, 1)
+    clave4 = str(uuid.uuid4())
+    proxy(PROXY_PAGOS, modo="drop_response", ruta="/api/pagos/", coincidencias=0)
+    r = comprar(tok4, clave4)
+    h4 = http("GET", f"{URL['pedidos']}/api/pedidos/usuario/{uid4}", token=tok4)
+    pid4 = (h4.data or [{}])[0].get("id", "")
+    s.check("(vii) cobro hecho, respuesta y consulta perdidas => POST 503, pedido pendiente", r.status == 503
+            and h4.data[0]["estado"] == "pendiente", f"{r} | {h4.data}")
+    s.check("(vii) mientras es incierto: pago_id aun null (HTTP y BD) y guia null", h4.data[0]["pago_id"] is None
+            and h4.data[0]["guia"] is None and pedidos_db(pid4, "pago_id is null") == "t")
+    svc("kill", "pagos")
+    proxy(PROXY_PAGOS, modo="pass", ruta="", coincidencias=0)
+    rc, out = svc("start", "pagos")
+    s.check("(vii) Pagos reiniciado (kill -9 + start): /ready 200", rc == 0, out[-80:])
+    time.sleep(6)  # backoff inicial de 5 s
+    for _ in range(6):  # sin cliente: pedidos:recuperar con las mismas claves
+        rc, out = svc("start", "pedidos-recuperar")
+        if pedido(pid4, tok4).data["estado"] == "pagado":
+            break
+        time.sleep(8)
+    s.nota("pedidos:recuperar => " + out.replace("\n", " | ")[-200:])
+    comp4 = http("GET", f"{URL['pagos']}/api/pagos/pedido/{pid4}", token=tok4)
+    det4 = pedido(pid4, tok4)
+    s.check("(vii) tras reiniciar Pagos y pedidos:recuperar el pedido queda pagado con pago_id = comprobante de Pagos (aprobado)",
+            det4.data["estado"] == "pagado" and comp4.data["estado"] == "aprobado" and det4.data["pago_id"] == comp4.data["id"],
+            f"{campos_pedido(det4.data)} comprobante={(comp4.data or {}).get('id')}")
+    s.check("(vii) BD de Pedidos: pago_id = comprobante; 1 solo pago; guia presente", pedidos_db(pid4, "pago_id") == comp4.data["id"]
+            and pagos_db(f"pedido_id='{pid4}'") == "1" and det4.data["guia"] == guia_de(pid4), pedidos_db(pid4))
+    r = comprar(tok4, clave4)
+    s.check("(vii) repetir la clave => 201 mismo pedido con los mismos campos", r.status == 201 and r.data["id"] == pid4
+            and campos_pedido(r.data) == campos_pedido(det4.data), campos_pedido(r.data))
+
+
+def admin_envios(query):
+    """SQL con el rol postgres del PG temporal e2e: SOLO para instalar/retirar el trigger de auditoria de la prueba."""
+    out = subprocess.run(
+        ["docker", "exec", "-e", "PGPASSWORD=" + ENV["PG_PASSWORD"], "mojarra-pg-e2e", "psql", "-h", "127.0.0.1",
+         "-U", "postgres", "-d", "db_envios", "-v", "ON_ERROR_STOP=1", "-Atc", query], capture_output=True, text=True, timeout=30)
+    if out.returncode != 0:
+        raise RuntimeError(out.stderr.strip())
+    return out.stdout.strip()
+
+
+AUDITORIA_ON = """
+create table if not exists e2e_auditoria_envios (id bigserial primary key, guia text, antes text, despues text,
+  ts timestamptz default clock_timestamp(), despachado_en timestamptz);
+grant all on e2e_auditoria_envios to usr_envios;
+grant usage on sequence e2e_auditoria_envios_id_seq to usr_envios;
+create or replace function e2e_audit() returns trigger language plpgsql as $f$
+begin insert into e2e_auditoria_envios(guia, antes, despues, despachado_en) values (NEW.guia, OLD.estado, NEW.estado, NEW.despachado_en);
+return NEW; end $f$;
+drop trigger if exists e2e_audit on envios;
+create trigger e2e_audit after update on envios for each row execute function e2e_audit();
+"""
+AUDITORIA_OFF = "drop trigger if exists e2e_audit on envios; drop function if exists e2e_audit(); drop table if exists e2e_auditoria_envios;"
+
+
+def transiciones(guia):
+    """Todas las UPDATE de la fila del envio (cualquier UPDATE, aunque no cambie el estado), en orden."""
+    return [x for x in sql("db_envios", "usr_envios", "PW_ENVIOS",
+                           f"select antes||'>'||despues from e2e_auditoria_envios where guia='{guia}' order by id").splitlines() if x]
+
+
+def estado_envio_bd(guia):
+    return sql("db_envios", "usr_envios", "PW_ENVIOS", f"select estado from envios where guia='{guia}'")
+
+
+def rastreo(guia, tok, base="envios"):
+    return http("GET", f"{URL[base]}/api/envios/rastreo/{guia}", token=tok, timeout=15)
+
+
+def segs_desde_despacho(guia):
+    return float(sql("db_envios", "usr_envios", "PW_ENVIOS", f"select extract(epoch from now()-despachado_en) from envios where guia='{guia}'"))
+
+
+@escenario(17, "Entrega automatica de Envios: preparando -> en_transito -> entregado sin tocar nada; 2 instancias; reinicio; no antes de tiempo")
+def esc17(s):
+    cfg = {"ENVIOS_DESPACHO_SEGUNDOS": "3", "ENVIOS_ENTREGA_SEGUNDOS": "3", "ENVIOS_DESPACHO_INTERVALO_SEGUNDOS": "1", "NOTIF_INTERVALO": "1"}
+    try:
+        _esc17(s, cfg)
+    finally:
+        try:
+            admin_envios(AUDITORIA_OFF)
+        except Exception as e:
+            s.nota(f"no se pudo retirar la auditoria: {e}")
+        svc("kill", "envios2")
+        svc("restart", "envios", {"NOTIF_INTERVALO": "3"})  # vuelve a la fase 'altos' (despacho y entrega lentos)
+
+
+def _esc17(s, cfg):
+    rc, out = svc("restart", "envios", cfg)
+    s.check("Envios reiniciado con ENVIOS_DESPACHO_SEGUNDOS=3, ENVIOS_ENTREGA_SEGUNDOS=3, ENVIOS_DESPACHO_INTERVALO_SEGUNDOS=1", rc == 0, out[-80:])
+    admin_envios(AUDITORIA_ON)
+    s.nota("instrumentacion de la prueba: trigger AFTER UPDATE en db_envios.envios que registra cada UPDATE (solo en el PG temporal; se retira al final)")
+
+    # ---- A) sin tocar nada: preparando -> en_transito -> entregado, en orden
+    # Las guias 'preparando' de escenarios anteriores se despachan al reiniciar con despacho a 3 s: se espera a que se asienten.
+    ok, t = esperar(lambda: sql("db_envios", "usr_envios", "PW_ENVIOS", "select count(*) from envios where estado='preparando'") == "0", 30, 1)
+    s.check(f"(A) guias antiguas en 'preparando' ya despachadas por el barrido ({t:.0f} s)", ok)
+    time.sleep(3)
+    total0 = int(sql("db_envios", "usr_envios", "PW_ENVIOS", "select count(*) from notificaciones_pedido"))
+    c = compra_pagada()
+    pid, guia = c["id"], c["guia"]
+    t0, seq, tiempos = time.time(), [], {}
+    while time.time() - t0 < 25:
+        r = rastreo(guia, c["tok"])
+        e = r.data["estado"] if r.status == 200 else f"HTTP{r.status}"
+        if not seq or seq[-1] != e:
+            seq.append(e)
+            tiempos[e] = time.time() - t0
+        if e == "entregado":
+            break
+        time.sleep(0.3)
+    s.nota("secuencia de rastreo observada (s tras terminar la compra): " + ", ".join(f"{e}@{tiempos[e]:.1f}" for e in seq))
+    s.check("(A) el rastreo recorre preparando -> en_transito -> entregado, en ese orden, sin intervencion", seq == ["preparando", "en_transito", "entregado"], seq)
+    tr = transiciones(guia)
+    s.check("(A) la BD registra exactamente 2 UPDATE del envio: preparando>en_transito y en_transito>entregado", tr == ["preparando>en_transito", "en_transito>entregado"], tr)
+    desp = sql("db_envios", "usr_envios", "PW_ENVIOS", f"select despachado_en is not null from envios where guia='{guia}'")
+    s.check("(A) despachado_en persistido en la BD de Envios", desp == "t", desp)
+    d_entrega = sql("db_envios", "usr_envios", "PW_ENVIOS",
+                    f"select round(extract(epoch from (select ts from e2e_auditoria_envios where guia='{guia}' and despues='entregado') - despachado_en)::numeric, 1) from envios where guia='{guia}'")
+    s.check(f"(A) la entrega ocurre >= 3 s despues de despachado_en (segun la BD: {d_entrega} s) y no mucho mas tarde (< 8 s)", 3.0 <= float(d_entrega) < 8.0, d_entrega)
+    ok, t = esperar(lambda: pedido(pid, c["tok"]).data["estado"] == "enviado", 15, 0.5)
+    s.check("(A) el pedido en Pedidos esta 'enviado' (por la notificacion del despacho)", ok, pedido(pid, c["tok"]).data["estado"])
+    ok, _ = esperar(lambda: n_outbox(pid, "enviada") == "1", 10, 0.5)
+    total1 = int(sql("db_envios", "usr_envios", "PW_ENVIOS", "select count(*) from notificaciones_pedido"))
+    time.sleep(6)  # varios barridos y ciclos del Notificador despues de la entrega
+    total2 = int(sql("db_envios", "usr_envios", "PW_ENVIOS", "select count(*) from notificaciones_pedido"))
+    s.check("(A) el pedido NO pasa a 'entregado': permanece 'enviado' 6 s despues de la entrega", pedido(pid, c["tok"]).data["estado"] == "enviado", pedido(pid, c["tok"]).data["estado"])
+    s.check(f"(A) outbox: 1 fila 'enviada' del pedido y solo +1 fila global (el despacho; {total0} -> {total1} -> {total2}); la entrega no encola nada",
+            ok and n_outbox(pid) == "1" and total1 == total0 + 1 and total2 == total1, f"{total0} {total1} {total2}")
+    gen = http("POST", URL["envios"] + "/api/envios/generar", {"pedido_id": pid, "direccion": DIRECCION}, idem(), service=ENV["T_PEDIDOS_ENVIOS"])
+    time.sleep(3)
+    s.nota(f"POST /generar tras la entrega => {gen.status} {gen.data}")
+    s.check("(A) repetir /generar y esperar no duplica ni deshace: 1 guia, misma guia (o 409), rastreo entregado, outbox 1, mismas 2 transiciones",
+            n_guias(pid) == "1" and (gen.status == 409 or (gen.status in (200, 201) and gen.data["guia"] == guia))
+            and rastreo(guia, c["tok"]).data["estado"] == "entregado" and n_outbox(pid) == "1" and transiciones(guia) == tr,
+            f"{gen.status} {rastreo(guia, c['tok']).data} {transiciones(guia)}")
+    s.check("(A) titularidad intacta: otro cliente no rastrea la guia entregada (403/404)", rastreo(guia, nuevo_usuario()[1]).status in (403, 404))
+
+    # ---- B) segunda instancia (otro puerto, misma BD): la transicion ocurre una sola vez por envio
+    rc, out = svc("start", "envios2", cfg)
+    s.check("(B) 2a instancia de Envios en el puerto 8013 (misma BD) lista: /ready 200", rc == 0, out[-80:])
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(3) as ex:  # 3 en paralelo: Pedidos de pruebas tiene 4 workers PHP y Pagos le llama de vuelta
+        compras = list(ex.map(lambda _: compra_pagada(), range(3)))
+    t0 = time.time()
+    ok, t = esperar(lambda: all(estado_envio_bd(x["guia"]) == "entregado" for x in compras), 30, 0.5)
+    s.check(f"(B) 3 compras simultaneas con 2 instancias barriendo: las 3 quedan 'entregado' sin intervencion ({t:.1f} s)", ok, [estado_envio_bd(x["guia"]) for x in compras])
+    time.sleep(4)
+    trs = [transiciones(x["guia"]) for x in compras]
+    s.check("(B) cada envio tiene exactamente 2 UPDATE (preparando>en_transito, en_transito>entregado): nadie entrego dos veces ni despacho dos veces",
+            all(x == ["preparando>en_transito", "en_transito>entregado"] for x in trs), trs)
+    ok, _ = esperar(lambda: all(pedido(x["id"], x["tok"]).data["estado"] == "enviado" for x in compras), 20, 0.5)
+    s.check("(B) los 3 pedidos 'enviado' (ninguno 'entregado') y 1 fila de outbox 'enviada' cada uno",
+            ok and all(n_outbox(x["id"]) == "1" and n_outbox(x["id"], "enviada") == "1" for x in compras))
+    r1, r2 = rastreo(compras[0]["guia"], compras[0]["tok"], "envios"), rastreo(compras[0]["guia"], compras[0]["tok"], "envios2")
+    s.check("(B) ambas instancias muestran el mismo rastreo 'entregado'", r1.status == r2.status == 200 and r1.data == r2.data and r1.data["estado"] == "entregado", f"{r1.data} | {r2.data}")
+    svc("kill", "envios2")
+
+    # ---- C) no entrega antes de tiempo: ENVIOS_ENTREGA_SEGUNDOS=60
+    rc, out = svc("restart", "envios", {**cfg, "ENVIOS_ENTREGA_SEGUNDOS": "60"})
+    s.check("(C) Envios reiniciado con ENVIOS_ENTREGA_SEGUNDOS=60 (despacho 3 s)", rc == 0, out[-80:])
+    c = compra_pagada()
+    guia = c["guia"]
+    ok, t = esperar(lambda: estado_envio_bd(guia) == "en_transito", 20, 0.5)
+    s.check(f"(C) despacha solo ({t:.1f} s)", ok, estado_envio_bd(guia))
+    time.sleep(15)
+    edad = segs_desde_despacho(guia)
+    r = rastreo(guia, c["tok"])
+    s.check(f"(C) {edad:.0f} s despues del despacho (< 60) sigue en_transito, sin entregar antes de tiempo",
+            15 <= edad < 60 and r.data["estado"] == "en_transito" and transiciones(guia) == ["preparando>en_transito"], f"{edad:.1f} {r.data} {transiciones(guia)}")
+
+    # ---- D) reinicio: se apaga Envios tras el despacho, vence el plazo con el servicio apagado, se reinicia
+    cfgD = {**cfg, "ENVIOS_ENTREGA_SEGUNDOS": "12"}
+    rc, out = svc("restart", "envios", cfgD)
+    s.check("(D) Envios reiniciado con ENVIOS_ENTREGA_SEGUNDOS=12", rc == 0, out[-80:])
+    c = compra_pagada()
+    guia, pid = c["guia"], c["id"]
+    ok, t = esperar(lambda: estado_envio_bd(guia) == "en_transito", 20, 0.3)
+    s.check(f"(D) despachado ({t:.1f} s)", ok, estado_envio_bd(guia))
+    svc("kill", "envios")
+    s.check("(D) Envios apagado (kill -9): puerto 8003 cerrado", http("GET", URL["envios"] + "/health", timeout=3).status == 0)
+    ok, t = esperar(lambda: segs_desde_despacho(guia) > 14, 30, 1)
+    s.check(f"(D) con Envios apagado vence el plazo (despachado hace {segs_desde_despacho(guia):.0f} s > 12 s) y la BD sigue en_transito (nadie entrega)",
+            ok and estado_envio_bd(guia) == "en_transito" and transiciones(guia) == ["preparando>en_transito"], f"{estado_envio_bd(guia)} {transiciones(guia)}")
+    rc, out = svc("start", "envios", cfgD)
+    s.check("(D) Envios reiniciado: /ready 200", rc == 0, out[-80:])
+    ok, t = esperar(lambda: estado_envio_bd(guia) == "entregado", 15, 0.5)
+    s.check(f"(D) tras reiniciar entrega sin intervencion ({t:.1f} s)", ok, estado_envio_bd(guia))
+    ok2, _ = esperar(lambda: pedido(pid, c["tok"]).data["estado"] == "enviado", 15, 0.5)
+    s.check("(D) rastreo entregado, pedido 'enviado' (no 'entregado'), 2 transiciones, outbox 1",
+            rastreo(guia, c["tok"]).data["estado"] == "entregado" and ok2 and transiciones(guia) == ["preparando>en_transito", "en_transito>entregado"]
+            and n_outbox(pid) == "1", f"{transiciones(guia)} {pedido(pid, c['tok']).data['estado']}")
 
 
 def cuerpo_grande(extra=None, kib=300):
@@ -853,7 +1151,7 @@ def esc12(s):
 def main():
     t0 = time.time()
     elegidos = {int(a) for a in sys.argv[1:]}
-    for fn in [f for f in [esc1, esc2, esc3, esc4, esc5, esc6, esc7, esc8, esc9, esc10, esc11, esc12, esc13, esc14, esc15] if not elegidos or f.num in elegidos]:
+    for fn in [f for f in [esc1, esc2, esc3, esc4, esc5, esc6, esc7, esc8, esc9, esc10, esc11, esc12, esc13, esc14, esc16, esc17, esc15] if not elegidos or f.num in elegidos]:
         fn()
     print("\n================ RESUMEN ================")
     for num, titulo, estado, fallos, nv in RESULTADOS:

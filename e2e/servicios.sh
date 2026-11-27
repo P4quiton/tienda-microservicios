@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Control de procesos de la corrida E2E. Uso: servicios.sh start|stop|kill|wait|logs <servicio>
-# Lee .tmp/env.sh (generado por run.sh). Servicios: pg productos inventario envios carrito pagos pedidos
+# Lee .tmp/env.sh (generado por run.sh). Servicios: pg productos inventario envios envios2 carrito pagos pedidos
 #   pedidos-recuperar (una pasada de `php artisan pedidos:recuperar`), proxy-pagos, proxy-carrito
 set -uo pipefail
 E2E="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,14 +18,15 @@ if [ "${E2E_FASE:-altos}" = altos ]; then
     export "$v=${!v:-100000}"
   done
   export ENVIOS_DESPACHO_SEGUNDOS="${ENVIOS_DESPACHO_SEGUNDOS:-3600}"
+  export ENVIOS_ENTREGA_SEGUNDOS="${ENVIOS_ENTREGA_SEGUNDOS:-3600}"   # tampoco entrega solo salvo el escenario 17
 else
   for v in "${LIMITES_VARS[@]}"; do unset "$v"; done
-  [ "${E2E_FASE_CONSERVA_DESPACHO:-}" = 1 ] || unset ENVIOS_DESPACHO_SEGUNDOS ENVIOS_DESPACHO_INTERVALO_SEGUNDOS
+  [ "${E2E_FASE_CONSERVA_DESPACHO:-}" = 1 ] || unset ENVIOS_DESPACHO_SEGUNDOS ENVIOS_DESPACHO_INTERVALO_SEGUNDOS ENVIOS_ENTREGA_SEGUNDOS
 fi
 
 puerto() {
   case "$1" in
-    productos) echo 8002;; envios) echo 8003;; inventario) echo 8004;; carrito) echo 8005;;
+    productos) echo 8002;; envios) echo 8003;; envios2) echo 8013;; inventario) echo 8004;; carrito) echo 8005;;
     pedidos) echo 8006;; pagos) echo 8007;; proxy-carrito) echo 8105;; proxy-pagos) echo 8107;;
   esac
 }
@@ -84,13 +85,13 @@ arrancar() {
         SERVICE_TOKEN_PEDIDOS_PAGOS=$T_PEDIDOS_PAGOS SERVICE_TOKEN_PAGOS_PEDIDOS=$T_PAGOS_PEDIDOS \
         && exec setsid java -jar target/api-pagos-0.1.0.jar ) >"$log" 2>&1 &
       echo $! >"$PIDS/$s.pid";;
-    envios)
+    envios|envios2)   # envios2: segunda instancia (otro puerto, misma BD) para el escenario 17
       ( cd "$ROOT/api-envios" && export DB_HOST=127.0.0.1 DB_PORT=$PG_PORT DB_DATABASE=db_envios DB_USERNAME=usr_envios \
         DB_PASSWORD=$PW_ENVIOS JWT_ISSUER=api-usuarios JWT_AUDIENCE=tienda-microservicios \
         JWT_PUBLIC_KEY_PATH="$E2E/.tmp/jwt-public.pem" SERVICE_TOKEN_PEDIDOS_ENVIOS=$T_PEDIDOS_ENVIOS \
         SERVICE_TOKEN_ENVIOS_PEDIDOS=$T_ENVIOS_PEDIDOS API_PEDIDOS_URL=http://127.0.0.1:8006 \
         PEDIDOS_TIMEOUT_SECONDS=3 NOTIFICACION_INTERVALO_SECONDS=${NOTIF_INTERVALO:-30} \
-        && exec setsid "$ENVIOS_VENV/bin/uvicorn" --factory app.main:build_app --host 127.0.0.1 --port 8003 ) >"$log" 2>&1 &
+        && exec setsid "$ENVIOS_VENV/bin/uvicorn" --factory app.main:build_app --host 127.0.0.1 --port $(puerto "$s") ) >"$log" 2>&1 &
       echo $! >"$PIDS/$s.pid";;
     pedidos)
       docker rm -f mojarra-pedidos-e2e >/dev/null 2>&1
@@ -116,7 +117,7 @@ detener() {
 
 listo() {
   case "$1" in
-    pedidos|pagos|carrito|envios|productos|inventario) esperar "http://127.0.0.1:$(puerto "$1")/ready" "${2:-90}";;
+    pedidos|pagos|carrito|envios|envios2|productos|inventario) esperar "http://127.0.0.1:$(puerto "$1")/ready" "${2:-90}";;
     proxy-*) sleep 0.5;;
   esac
 }
