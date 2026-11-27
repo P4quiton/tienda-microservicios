@@ -820,7 +820,7 @@ def esc16(s):
     for nombre, x in (("201", d2), ("GET detalle", pedido(pid2, tok2).data), ("GET historial", (hist2.data or [{}])[0])):
         s.check(f"(ii) {nombre}: pago_id = comprobante rechazado (uuid v4), guia null, metodo transferencia_simulada, estado cancelado",
                 x.get("pago_id") == (comp2.data or {}).get("id") and re.match(UUID4, x.get("pago_id") or "") is not None
-                and x.get("guia") is None and x.get("metodo_pago") == "transferencia_simulada" and x.get("estado") == "cancelado",
+                and "guia" in x and x["guia"] is None and x.get("metodo_pago") == "transferencia_simulada" and x.get("estado") == "cancelado",
                 campos_pedido(x))
     s.check("(ii) BD de Pedidos: pago_id = comprobante, guia NULL", pedidos_db(pid2) == f"{comp2.data['id']}||transferencia_simulada|cancelado", pedidos_db(pid2))
 
@@ -978,8 +978,8 @@ def _esc17(s, cfg):
     gen = http("POST", URL["envios"] + "/api/envios/generar", {"pedido_id": pid, "direccion": DIRECCION}, idem(), service=ENV["T_PEDIDOS_ENVIOS"])
     time.sleep(3)
     s.nota(f"POST /generar tras la entrega => {gen.status} {gen.data}")
-    s.check("(A) repetir /generar y esperar no duplica ni deshace: 1 guia, misma guia (o 409), rastreo entregado, outbox 1, mismas 2 transiciones",
-            n_guias(pid) == "1" and (gen.status == 409 or (gen.status in (200, 201) and gen.data["guia"] == guia))
+    s.check("(A) repetir /generar y esperar no duplica ni deshace: 1 guia, 201 con la misma guia (resultado original), rastreo entregado, outbox 1, mismas 2 transiciones",
+            n_guias(pid) == "1" and (gen.status == 201 and gen.data["guia"] == guia)
             and rastreo(guia, c["tok"]).data["estado"] == "entregado" and n_outbox(pid) == "1" and transiciones(guia) == tr,
             f"{gen.status} {rastreo(guia, c['tok']).data} {transiciones(guia)}")
     s.check("(A) titularidad intacta: otro cliente no rastrea la guia entregada (403/404)", rastreo(guia, nuevo_usuario()[1]).status in (403, 404))
@@ -1033,7 +1033,7 @@ def _esc17(s, cfg):
     rc, out = svc("start", "envios", cfgD)
     s.check("(D) Envios reiniciado: /ready 200", rc == 0, out[-80:])
     ok, t = esperar(lambda: estado_envio_bd(guia) == "entregado", 15, 0.5)
-    s.check(f"(D) tras reiniciar entrega sin intervencion ({t:.1f} s)", ok, estado_envio_bd(guia))
+    s.check(f"(D) tras reiniciar entrega sin intervencion y SIN reiniciar el plazo ({t:.1f} s < 6 s, plazo de 12 s ya vencido)", ok and t < 6, estado_envio_bd(guia))
     ok2, _ = esperar(lambda: pedido(pid, c["tok"]).data["estado"] == "enviado", 15, 0.5)
     s.check("(D) rastreo entregado, pedido 'enviado' (no 'entregado'), 2 transiciones, outbox 1",
             rastreo(guia, c["tok"]).data["estado"] == "entregado" and ok2 and transiciones(guia) == ["preparando>en_transito", "en_transito>entregado"]

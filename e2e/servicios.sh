@@ -105,11 +105,10 @@ arrancar() {
 detener() {
   local s="$1"
   if [ "$s" = pedidos ]; then docker kill mojarra-pedidos-e2e >/dev/null 2>&1; docker rm -f mojarra-pedidos-e2e >/dev/null 2>&1; fi
-  if [ -f "$PIDS/$s.pid" ]; then
-    local pid; pid=$(cat "$PIDS/$s.pid")
-    kill -9 -- "-$pid" 2>/dev/null; kill -9 "$pid" 2>/dev/null
-    rm -f "$PIDS/$s.pid"
-  fi
+  [ -f "$PIDS/$s.pid" ] || return 0   # sin pidfile propio no se toca ningun proceso (podria ser ajeno)
+  local pid; pid=$(cat "$PIDS/$s.pid")
+  kill -9 -- "-$pid" 2>/dev/null; kill -9 "$pid" 2>/dev/null
+  rm -f "$PIDS/$s.pid"
   # Java/uvicorn/node pueden quedar huerfanos si setsid dio otro grupo: se barre por puerto propio.
   local p; p=$(puerto "$s"); [ -n "$p" ] && ss -ltnpH "sport = :$p" 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u | xargs -r kill -9 2>/dev/null
   return 0

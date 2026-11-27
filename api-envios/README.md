@@ -39,7 +39,7 @@ Las guías en `en_transito` pasan a `entregado` tras `ENVIOS_ENTREGA_SEGUNDOS` (
 desde `despachado_en`. PostgreSQL calcula los plazos, que sobreviven a reinicios. Ambos barridos usan
 `FOR UPDATE SKIP LOCKED` para que varias réplicas puedan trabajar sin repetir transiciones.
 La migración 003 inicia el plazo de las guías en tránsito que carecen de fecha de despacho a partir del momento de migrar.
-La entrega solo actualiza la guía. El pedido sigue en `enviado` y Angular consulta el rastreo para mostrar `entregado`.
+La entrega solo actualiza la guía. El pedido sigue en `enviado` y Angular consulta el rastreo para mostrar `entregado`. Si el aviso del despacho a Pedidos aún está pendiente (outbox con reintentos), el pedido puede seguir en `pagado` mientras el rastreo ya muestra el avance.
 
 ### Rate limiting y tamaño de cuerpo
 

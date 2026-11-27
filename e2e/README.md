@@ -36,6 +36,6 @@ Requisitos (sin `docker build` ni red): imagenes locales `postgres:17` y `pedido
 
 ## Notas de alcance
 
-- Los escenarios consultan las BD de Pagos y Envios con el rol de cada servicio solo para contar pagos/guias; todo lo demas es HTTP.
+- Los escenarios consultan las BD de Pagos y Envios con el rol de cada servicio para contar pagos/guias, contrastar `pago_id` y `despachado_en` y auditar transiciones de `envios` (escenario 17: un trigger temporal en el PG efimero, retirado al terminar); todo lo demas es HTTP.
 - No se prueba Usuarios, Productos ni Inventario reales: sus stubs solo garantizan lo que el contrato exige a sus consumidores.
 - `docker pause` se aplica unicamente a `mojarra-pg-e2e`.
