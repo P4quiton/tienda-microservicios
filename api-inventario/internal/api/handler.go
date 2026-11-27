@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"time"
 
@@ -15,8 +17,18 @@ import (
 )
 
 type Handler struct {
-	store    *store.Postgres
-	products ProductVerifier
+	configuration config.Config
+	store         *store.Postgres
+	products      ProductVerifier
+}
+
+type reserveRequest struct {
+	PedidoID string       `json:"pedido_id"`
+	Items    []store.Item `json:"items"`
+}
+
+type transitionRequest struct {
+	PedidoID string `json:"pedido_id"`
 }
 
 type successEnvelope struct {
@@ -27,8 +39,9 @@ type successEnvelope struct {
 
 func NewRouter(configuration config.Config, inventoryStore *store.Postgres) *gin.Engine {
 	handler := &Handler{
-		store:    inventoryStore,
-		products: NewProductVerifier(configuration.ProductosAPIBaseURL),
+		configuration: configuration,
+		store:         inventoryStore,
+		products:      NewProductVerifier(configuration.ProductosAPIBaseURL),
 	}
 
 	router := gin.New()
@@ -37,6 +50,10 @@ func NewRouter(configuration config.Config, inventoryStore *store.Postgres) *gin
 	router.GET("/ready", handler.ready)
 	router.GET("/api/inventario/:producto_id", handler.getAvailability)
 	router.POST("/api/inventario/reabastecer", AdminJWTAuth(configuration), handler.replenish)
+	internal := router.Group("/api/inventario", ServiceAuth(configuration.PedidosServiceToken))
+	internal.POST("/reservar", handler.reserve)
+	internal.POST("/confirmar", handler.confirm)
+	internal.POST("/liberar", handler.release)
 	router.NoRoute(func(c *gin.Context) {
 		writeError(c, http.StatusNotFound, "Recurso no encontrado.", nil)
 	})
@@ -149,6 +166,106 @@ func (h *Handler) replenish(c *gin.Context) {
 		return
 	}
 	writeSuccess(c, http.StatusOK, "Inventario reabastecido correctamente.", result)
+}
+
+func (h *Handler) reserve(c *gin.Context) {
+	var request reserveRequest
+	if !decodeJSON(c, &request) {
+		return
+	}
+	orderID, valid := parseUUIDv4Value(c, "pedido_id", request.PedidoID)
+	if !valid {
+		return
+	}
+	idempotencyKey, valid := parseUUIDv4Value(c, "Idempotency-Key", c.GetHeader("Idempotency-Key"))
+	if !valid {
+		return
+	}
+	if len(request.Items) == 0 {
+		writeValidationError(c, "items", "Debe incluir al menos un artículo.")
+		return
+	}
+
+	quantities := make(map[string]int64, len(request.Items))
+	for index := range request.Items {
+		productID, productValid := parseUUIDv4Value(c, fmt.Sprintf("items.%d.producto_id", index), request.Items[index].ProductoID)
+		if !productValid {
+			return
+		}
+		if request.Items[index].Cantidad < 1 {
+			writeValidationError(c, fmt.Sprintf("items.%d.cantidad", index), "La cantidad debe ser un entero positivo.")
+			return
+		}
+		request.Items[index].ProductoID = productID
+		if quantities[productID] > math.MaxInt64-request.Items[index].Cantidad {
+			writeValidationError(c, fmt.Sprintf("items.%d.cantidad", index), "La cantidad acumulada está fuera de rango.")
+			return
+		}
+		quantities[productID] += request.Items[index].Cantidad
+	}
+
+	items := make([]store.Item, 0, len(quantities))
+	for productID, quantity := range quantities {
+		items = append(items, store.Item{ProductoID: productID, Cantidad: quantity})
+	}
+	items = store.NormalizeItems(items)
+	idempotencyHash, err := store.Hash(struct {
+		PedidoID string       `json:"pedido_id"`
+		Items    []store.Item `json:"items"`
+	}{PedidoID: orderID, Items: request.Items})
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "No se pudo procesar la solicitud.", nil)
+		return
+	}
+	reservationHash, err := store.Hash(items)
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "No se pudo procesar la solicitud.", nil)
+		return
+	}
+
+	reservation, err := h.store.Reserve(c.Request.Context(), idempotencyKey, callerIdentity(c), idempotencyHash, reservationHash, orderID, items)
+	if err != nil {
+		writeStoreError(c, err)
+		return
+	}
+	writeSuccess(c, http.StatusOK, "Existencias reservadas correctamente.", reservation)
+}
+
+func (h *Handler) confirm(c *gin.Context) {
+	h.transitionReservation(c, "confirmada")
+}
+
+func (h *Handler) release(c *gin.Context) {
+	h.transitionReservation(c, "liberada")
+}
+
+func (h *Handler) transitionReservation(c *gin.Context, targetState string) {
+	var request transitionRequest
+	if !decodeJSON(c, &request) {
+		return
+	}
+	orderID, valid := parseUUIDv4Value(c, "pedido_id", request.PedidoID)
+	if !valid {
+		return
+	}
+	idempotencyKey, valid := parseUUIDv4Value(c, "Idempotency-Key", c.GetHeader("Idempotency-Key"))
+	if !valid {
+		return
+	}
+	requestHash, err := store.Hash(struct {
+		PedidoID string `json:"pedido_id"`
+	}{PedidoID: orderID})
+	if err != nil {
+		writeError(c, http.StatusInternalServerError, "No se pudo procesar la solicitud.", nil)
+		return
+	}
+
+	reservation, err := h.store.ChangeReservationState(c.Request.Context(), idempotencyKey, callerIdentity(c), requestHash, orderID, targetState)
+	if err != nil {
+		writeStoreError(c, err)
+		return
+	}
+	writeSuccess(c, http.StatusOK, "Estado de reserva actualizado.", reservation)
 }
 
 func writeError(c *gin.Context, status int, message string, fields map[string][]string) {
