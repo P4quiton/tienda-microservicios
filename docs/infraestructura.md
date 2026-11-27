@@ -70,6 +70,8 @@ Desde la raíz del repositorio:
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\init-env.ps1
 ```
 
+Nota: el comando anterior usa `powershell` (Windows PowerShell 5.1). El script se ha probado solo con PowerShell 7.4; la compatibilidad con 5.1 se ha revisado por lectura, no ejecutado.
+
 El script genera contraseñas aleatorias mediante un generador criptográficamente seguro.
 
 El archivo `.env` generado es local y no debe compartirse ni subirse al repositorio.
@@ -99,6 +101,8 @@ Ambos servicios deberán aparecer con estado healthy.
 | MongoDB | 127.0.0.1 | 27017 |
 
 Los puertos publicados pueden modificarse mediante `POSTGRES_HOST_PORT` y `MONGO_HOST_PORT`.
+
+Compose publica también los servicios de aplicación en loopback para pruebas locales: Usuarios `127.0.0.1:8001`, Productos `127.0.0.1:8002`, Envíos `127.0.0.1:8003`, Inventario `127.0.0.1:8004`, Carrito `127.0.0.1:8005`, Pedidos `127.0.0.1:8006`, Pagos `127.0.0.1:8007`, Reseñas `127.0.0.1:8008` y frontend `127.0.0.1:4200`. El frontend es el punto de entrada previsto para una red real; en esta configuración el puerto también queda limitado al loopback. El puerto del frontend se configura con `FRONTEND_HOST_PORT` y el de Usuarios con `USUARIOS_HOST_PORT`.
 
 ### Desarrollo dentro de Docker
 
@@ -159,6 +163,8 @@ Las credenciales administrativas no deben utilizarse desde los microservicios.
 
 - Publicación de puertos limitada a localhost.
 - Comunicación entre contenedores mediante red interna.
+- Subred fija de `red-tienda`: `172.28.0.0/16` (ipam en `docker-compose.yml`). `TRUSTED_PROXIES` de Usuarios, Productos, Carrito, Inventario y Reseñas vale esa subred, donde está el Nginx del frontend. Ningún servicio acepta `0.0.0.0/0` ni `::/0`.
+- Variables de token entre servicios: cada par usa un único nombre, por ejemplo `SERVICE_TOKEN_PEDIDOS_INVENTARIO`, y compose entrega el mismo valor a ambos extremos.
 - Exclusión de archivos .env mediante .gitignore.
 - Contraseñas independientes y aleatorias por servicio.
 - Archivos de inicialización montados en modo de solo lectura.
@@ -195,9 +201,22 @@ El archivo compose.init-test.yaml permite inicializar una infraestructura tempor
 docker compose -p tienda-init-test -f docker-compose.yml -f compose.init-test.yaml up -d --wait --wait-timeout 180
 ```
 
-Este entorno no publica puertos en el equipo anfitrión.
+Este entorno no publica puertos en el equipo anfitrión. `compose.init-test.yaml` pone `ports: !reset []` en los 11 servicios (PostgreSQL, MongoDB, los 8 microservicios y el frontend), así que el `127.0.0.1:8001` y el resto de publicaciones de `docker-compose.yml` no se aplican. Probado con Docker Compose v5.5.0. Para comprobarlo sin levantar nada:
 
-Para eliminar exclusivamente los recursos temporales:
+```bash
+docker compose -f docker-compose.yml -f compose.init-test.yaml --env-file .env.example config --quiet
+docker compose -f docker-compose.yml -f compose.init-test.yaml --env-file .env.example config --format json | grep -c '"published"'
+```
+
+El segundo comando debe imprimir `0`. Un servicio de la aplicación no debe publicar puertos al host en este entorno. Si una prueba necesita alcanzar un servicio desde el anfitrión, hay que añadir una publicación explícita en `127.0.0.1` mediante una variable en el propio archivo de pruebas, nunca en `docker-compose.yml`.
+
+Dentro de la red temporal, los servicios se llaman por su nombre de servicio (`postgres:5432`, `mongodb:27017`, `api-pedidos:8006`). Para ejecutar comandos contra ellos, usa `docker compose -p tienda-init-test ... exec <servicio> <comando>`.
+
+Reglas de seguridad de este entorno:
+
+- Usa siempre `-p tienda-init-test`. Sin `-p`, el proyecto sería `tienda-microservicios`, el del stack real, y `down -v` afectaría a sus volúmenes.
+- Los volúmenes y la red llevan el nombre del proyecto (`tienda-init-test_*` y `red-tienda-init-test`), así que `down -v` solo elimina recursos temporales.
+- Para eliminar exclusivamente los recursos temporales:
 
 ```bash
 docker compose -p tienda-init-test -f docker-compose.yml -f compose.init-test.yaml down -v

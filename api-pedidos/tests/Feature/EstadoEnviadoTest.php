@@ -5,7 +5,10 @@ namespace Tests\Feature;
 use App\Pedidos\Pedido;
 use Firebase\JWT\JWT;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 /** PATCH /api/pedidos/{id}/estado: solo Envíos, pagado -> enviado (contrato 1.1.0). */
@@ -118,6 +121,93 @@ final class EstadoEnviadoTest extends TestCase
         } finally {
             Pedido::whereIn('id', [$a->id, $b->id])->delete();
         }
+    }
+
+    public static function casosPatchConcurrente(): array
+    {
+        return [
+            'mismo pedido' => [true, 200],
+            'pedidos distintos' => [false, 409],
+        ];
+    }
+
+    #[DataProvider('casosPatchConcurrente')]
+    public function test_patch_concurrente_serializa_la_misma_clave(bool $mismoPedido, int $segundoEstado): void
+    {
+        $this->postgres();
+        $primero = $this->pedido('pagado');
+        $segundo = $mismoPedido ? $primero : $this->pedido('pagado');
+        $clave = (string) Str::uuid();
+        $a = $this->procesoPatch($primero->id, $clave, 'estado-a-'.$clave);
+        $b = $this->procesoPatch($segundo->id, strtoupper($clave), 'estado-b-'.$clave);
+
+        try {
+            // Retener la fila hasta que ambos PATCH estén en ejecución en conexiones distintas.
+            DB::transaction(function () use ($primero, $a, $b, $clave) {
+                Pedido::whereKey($primero->id)->lockForUpdate()->firstOrFail();
+                $a->start();
+                $this->esperarBloqueo($a, 'estado-a-'.$clave);
+                $b->start();
+                $this->esperarBloqueo($b, 'estado-b-'.$clave, 'advisory');
+            });
+
+            $respuestaA = $this->respuestaPatch($a);
+            $respuestaB = $this->respuestaPatch($b);
+            $this->assertSame(200, $respuestaA['status']);
+            $this->assertSame($primero->id, $respuestaA['cuerpo']['data']['id']);
+            $this->assertSame('enviado', $respuestaA['cuerpo']['data']['estado']);
+            $this->assertSame($segundoEstado, $respuestaB['status']);
+            if ($mismoPedido) {
+                $this->assertSame($respuestaA['cuerpo'], $respuestaB['cuerpo']);
+            } else {
+                $this->assertFalse($respuestaB['cuerpo']['success']);
+                $this->assertSame('La clave ya se utilizó con otros datos', $respuestaB['cuerpo']['message']);
+            }
+
+            $registro = DB::table('pedidos_cambios_estado')->where('clave', $clave)->sole();
+            $this->assertSame($primero->id, $registro->pedido_id);
+            $this->assertSame('enviado', $registro->estado);
+            $this->assertSame('enviado', $primero->fresh()->estado);
+            $this->assertSame($mismoPedido ? 'enviado' : 'pagado', $segundo->fresh()->estado);
+        } finally {
+            $a->stop();
+            $b->stop();
+            Pedido::whereIn('id', [$primero->id, $segundo->id])->delete();
+        }
+    }
+
+    private function respuestaPatch(Process $proceso): array
+    {
+        $this->assertSame(0, $proceso->wait(), $proceso->getErrorOutput());
+
+        return json_decode($proceso->getOutput(), true, flags: JSON_THROW_ON_ERROR);
+    }
+
+    private function procesoPatch(string $id, string $clave, string $conexion): Process
+    {
+        return new Process(
+            [PHP_BINARY, base_path('tests/Support/EstadoWorker.php'), $id, $clave, $conexion],
+            env: ['SERVICE_TOKEN_ENVIOS_PEDIDOS' => $this->tokenEnvios],
+            timeout: 15,
+        );
+    }
+
+    private function esperarBloqueo(Process $proceso, string $conexion, ?string $evento = null): void
+    {
+        $limite = hrtime(true) + 5_000_000_000;
+        do {
+            DB::selectOne('SELECT pg_stat_clear_snapshot()');
+            $espera = DB::selectOne(
+                "SELECT wait_event FROM pg_stat_activity WHERE application_name = ? AND wait_event_type = 'Lock'",
+                [$conexion],
+            );
+            if ($espera !== null && ($evento === null || $espera->wait_event === $evento)) {
+                return;
+            }
+            usleep(10_000);
+        } while ($proceso->isRunning() && hrtime(true) < $limite);
+
+        $this->fail('El PATCH no esperó el bloqueo '.($evento ?? 'de fila').' en PostgreSQL: '.$proceso->getOutput().$proceso->getErrorOutput());
     }
 
     public function test_pedido_inexistente_da_404(): void

@@ -15,6 +15,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.config import Settings, load_settings
 from app.database import create_mongo_client, ensure_review_indexes
 from app.errors import ApiProblem, ProductNotFound, ProductServiceUnavailable
+from app.limits import RequestGuardMiddleware, parse_trusted_proxy_cidrs
 from app.products import ProductVerifier
 from app.schemas import ReviewCreate, ReviewEnvelope, ReviewListEnvelope, ReviewResponse
 from app.security import bearer_scheme, current_user
@@ -29,6 +30,7 @@ def create_app(
     product_verifier: ProductVerifier | None = None,
 ) -> FastAPI:
     app_settings = settings or load_settings()
+    trusted_proxies = parse_trusted_proxy_cidrs(app_settings.trusted_proxy_cidrs)
     owns_client = mongo_client is None
 
     @asynccontextmanager
@@ -45,14 +47,18 @@ def create_app(
             ensure_review_indexes(app.state.reviews)
             app.state.review_indexes_ready = True
         except PyMongoError:
-            logger.warning("MongoDB aún no está disponible; se reintentará al validar readiness.")
+            logger.warning("No se pudieron preparar los índices de MongoDB; se reintentará al validar readiness.")
         try:
             yield
         finally:
             if owns_client:
                 client.close()
 
-    app = FastAPI(title="API Reseñas", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(title="API Reseñas", version="1.1.0", lifespan=lifespan)
+    app.add_middleware(
+        RequestGuardMiddleware,
+        trusted_proxies=trusted_proxies,
+    )
 
     @app.exception_handler(ApiProblem)
     async def api_problem_handler(_: Request, error: ApiProblem) -> JSONResponse:
@@ -117,6 +123,7 @@ def create_app(
                 ensure_review_indexes(request.app.state.reviews)
                 request.app.state.review_indexes_ready = True
         except PyMongoError:
+            request.app.state.review_indexes_ready = False
             return JSONResponse(
                 status_code=503,
                 content={"status": "unavailable", "service": "api-resenas"},
@@ -189,6 +196,12 @@ def create_app(
         request: Request,
         user: dict[str, str] = Depends(authenticated_user),
     ) -> ReviewEnvelope:
+        if payload.usuario_id is not None and str(payload.usuario_id) != user["usuario_id"]:
+            raise ApiProblem(
+                403,
+                "El usuario_id no coincide con la credencial.",
+                {"usuario_no_coincide": ["El usuario_id debe coincidir con el sub del token."]},
+            )
         if not request.app.state.review_indexes_ready:
             raise ApiProblem(
                 503,

@@ -2,6 +2,7 @@ import express from 'express';
 import { authentication, uuidV4 } from './auth.js';
 import { ApiError } from './errors.js';
 import { createRateLimiter, loadLimits } from './limits.js';
+import { parseTrustedProxies } from './proxies.js';
 
 function readUUID(value, field) {
   if (typeof value !== 'string' || !uuidV4.test(value)) {
@@ -63,14 +64,19 @@ function readLines(items) {
   return lines;
 }
 
-export function createApp({ store, available, publicKey, serviceToken, limits = loadLimits(process.env), now }) {
+export function createApp({
+  store, available, publicKey, serviceToken, limits = loadLimits(process.env), now,
+  trustedProxies = parseTrustedProxies(process.env.TRUSTED_PROXIES),
+}) {
   const app = express();
+  // Solo se lee X-Forwarded-For si el socket pertenece a un proxy listado; vacío = no confiar en ninguno.
+  app.set('trust proxy', trustedProxies.length ? trustedProxies : false);
   const auth = authentication({ publicKey, serviceToken });
   const hit = createRateLimiter({ limits, now });
 
   // Autentica primero y limita después: sin credencial válida sigue siendo 401/403.
-  // Los fallos de autenticación cuentan contra la IP (cupo de consultas); sin `trust proxy`
-  // detrás de un proxy esa IP es la del proxy.
+  // Los fallos de autenticación cuentan contra la IP (cupo de consultas). req.ip solo usa X-Forwarded-For
+  // si el socket está en TRUSTED_PROXIES; si no, es la dirección del cliente directo.
   async function limited(req, bucket, authenticate) {
     let identity;
     try {

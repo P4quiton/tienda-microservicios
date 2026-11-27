@@ -104,6 +104,19 @@ func (p *Postgres) Replenish(ctx context.Context, idempotencyKey, identity, requ
 	return result, nil
 }
 
+// estadoStockInsuficiente marca, dentro del resultado idempotente guardado, que
+// la clave fue rechazada por falta de stock. No es un estado de la tabla reservas.
+const estadoStockInsuficiente = "stock_insuficiente"
+
+// Reserve reserva todos los artículos de un pedido de forma atómica.
+//
+// Flujo: (1) registra o recupera la clave de idempotencia; (2) abre un
+// SAVEPOINT; (3) inserta la reserva y bloquea/actualiza cada producto en
+// orden UUID. Si algún artículo no alcanza, ROLLBACK TO SAVEPOINT deshace
+// la reserva parcial completa, se guarda el rechazo stock_insuficiente bajo la
+// clave (la fila de la clave sobrevive al savepoint) y se confirma. Repetir
+// la misma clave devuelve el mismo rechazo aunque se reabastezca después; una
+// clave nueva vuelve a evaluar el stock si el pedido aún no tiene reserva.
 func (p *Postgres) Reserve(ctx context.Context, idempotencyKey, identity, idempotencyHash, reservationHash, orderID string, items []Item) (Reservation, error) {
 	tx, err := p.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -123,10 +136,10 @@ func (p *Postgres) Reserve(ctx context.Context, idempotencyKey, identity, idempo
 		if err := tx.Commit(ctx); err != nil {
 			return Reservation{}, fmt.Errorf("confirmar respuesta idempotente: %w", err)
 		}
-		if result.Estado == "stock_insuficiente" {
-            return Reservation{}, ErrInsufficientStock
-        }
-        return result, nil
+		if result.Estado == estadoStockInsuficiente {
+			return Reservation{}, ErrInsufficientStock
+		}
+		return result, nil
 	}
 
 	serializedItems, err := json.Marshal(items)
@@ -135,32 +148,32 @@ func (p *Postgres) Reserve(ctx context.Context, idempotencyKey, identity, idempo
 	}
 
 	if _, err := tx.Exec(ctx, "SAVEPOINT reserva_stock"); err != nil {
-return Reservation{}, err
-}
+		return Reservation{}, fmt.Errorf("crear savepoint de reserva: %w", err)
+	}
 
-rejectStock := func() (Reservation, error) {
-if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT reserva_stock"); err != nil {
-return Reservation{}, err
-}
+	rejectStock := func() (Reservation, error) {
+		if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT reserva_stock"); err != nil {
+			return Reservation{}, fmt.Errorf("revertir reserva parcial: %w", err)
+		}
 
-result := Reservation{
-PedidoID: orderID,
-Items: items,
-Estado: "stock_insuficiente",
-}
+		result := Reservation{
+			PedidoID: orderID,
+			Items:    items,
+			Estado:   estadoStockInsuficiente,
+		}
 
-if err := saveIdempotentResult(ctx, tx, idempotencyKey, result); err != nil {
-return Reservation{}, err
-}
+		if err := saveIdempotentResult(ctx, tx, idempotencyKey, result); err != nil {
+			return Reservation{}, err
+		}
 
-if err := tx.Commit(ctx); err != nil {
-return Reservation{}, err
-}
+		if err := tx.Commit(ctx); err != nil {
+			return Reservation{}, fmt.Errorf("confirmar rechazo de reserva: %w", err)
+		}
 
-return Reservation{}, ErrInsufficientStock
-}
+		return Reservation{}, ErrInsufficientStock
+	}
 
-var insertedOrderID string
+	var insertedOrderID string
 	err = tx.QueryRow(ctx, `
 		INSERT INTO reservas (pedido_id, request_hash, items, estado)
 		VALUES ($1, $2, $3, 'reservada')
@@ -219,7 +232,7 @@ var insertedOrderID string
 		return Reservation{}, fmt.Errorf("confirmar reserva: %w", err)
 	}
 
-return result, nil
+	return result, nil
 }
 
 type lockedReservation struct {
@@ -256,11 +269,9 @@ func (p *Postgres) ChangeReservationState(ctx context.Context, idempotencyKey, i
 	}
 	defer tx.Rollback(ctx)
 
-	operation := targetState
+	operation := "liberar"
 	if targetState == "confirmada" {
 		operation = "confirmar"
-	} else {
-		operation = "liberar"
 	}
 	storedResult, replay, err := beginIdempotentOperation(ctx, tx, idempotencyKey, identity, operation, requestHash)
 	if err != nil {

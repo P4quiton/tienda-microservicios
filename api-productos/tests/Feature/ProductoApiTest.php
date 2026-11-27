@@ -22,7 +22,7 @@ class ProductoApiTest extends TestCase
 
         $this->privateKey = openssl_pkey_new([
             'private_key_type' => OPENSSL_KEYTYPE_RSA,
-            'private_key_bits' => 2048,
+            'private_key_bits' => 3072,
         ]);
 
         $keyDetails = openssl_pkey_get_details($this->privateKey);
@@ -156,9 +156,23 @@ class ProductoApiTest extends TestCase
         $this->assertDatabaseCount('productos', 0);
     }
 
-    private function makeToken(string $role): string
+    public function test_creation_rejects_invalid_signature_and_expired_token(): void
     {
-        $issuedAt = time();
+        [$header, $claims, $signature] = explode('.', $this->makeToken('admin'));
+        $signature[0] = $signature[0] === 'A' ? 'B' : 'A';
+
+        $this->withToken("$header.$claims.$signature")
+            ->postJson('/api/productos', [])
+            ->assertUnauthorized();
+
+        $this->withToken($this->makeToken('admin', time() - 3601))
+            ->postJson('/api/productos', [])
+            ->assertUnauthorized();
+    }
+
+    private function makeToken(string $role, ?int $issuedAt = null): string
+    {
+        $issuedAt ??= time();
         $header = ['alg' => 'RS256', 'typ' => 'JWT'];
         $claims = [
             'sub' => (string) Str::uuid(),

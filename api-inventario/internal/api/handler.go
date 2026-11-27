@@ -1,11 +1,13 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"os"
@@ -16,6 +18,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
+
+// maxBodyBytes es el límite de cuerpo JSON acordado (256 KiB); por encima, 413.
+const maxBodyBytes = 262144
 
 type Handler struct {
 	configuration config.Config
@@ -50,12 +55,27 @@ func NewRouter(configuration config.Config, inventoryStore *store.Postgres) *gin
 	}
 
 	router := gin.New()
+	configureTrustedProxies(router, configuration.TrustedProxies)
 	router.Use(gin.Logger(), gin.Recovery())
+
+	// /health y /ready quedan fuera del límite: son sondas de Compose/Kubernetes.
+	queryLimit := rateLimitMiddleware(newRateLimiter(
+		limitOrDefault(configuration.RateLimitQuery, config.DefaultRateLimitQuery),
+		limitOrDefault(configuration.RateLimitMaxClients, config.DefaultRateLimitMaxClients), nil))
+	mutationLimit := rateLimitMiddleware(newRateLimiter(
+		limitOrDefault(configuration.RateLimitMutation, config.DefaultRateLimitMutation),
+		limitOrDefault(configuration.RateLimitMaxClients, config.DefaultRateLimitMaxClients), nil))
+	internalLimit := rateLimitMiddleware(newRateLimiter(
+		limitOrDefault(configuration.RateLimitInternal, config.DefaultRateLimitInternal),
+		limitOrDefault(configuration.RateLimitMaxClients, config.DefaultRateLimitMaxClients), nil))
+
 	router.GET("/health", handler.health)
 	router.GET("/ready", handler.ready)
-	router.GET("/api/inventario/:producto_id", handler.getAvailability)
-	router.POST("/api/inventario/reabastecer", AdminJWTAuth(configuration), handler.replenish)
-	internal := router.Group("/api/inventario", ServiceAuth(configuration.PedidosServiceToken))
+	router.GET("/api/inventario/:producto_id", queryLimit, handler.getAvailability)
+	// El límite va antes de la autenticación: frena también los intentos con
+	// credenciales inválidas (fuerza bruta del token o JWT costosos de verificar).
+	router.POST("/api/inventario/reabastecer", mutationLimit, AdminJWTAuth(configuration), handler.replenish)
+	internal := router.Group("/api/inventario", internalLimit, ServiceAuth(configuration.PedidosServiceToken))
 	internal.POST("/reservar", handler.reserve)
 	internal.POST("/confirmar", handler.confirm)
 	internal.POST("/liberar", handler.release)
@@ -66,6 +86,26 @@ func NewRouter(configuration config.Config, inventoryStore *store.Postgres) *gin
 	return router
 }
 
+func limitOrDefault(value, fallback int) int {
+	if value < 1 {
+		return fallback
+	}
+	return value
+}
+
+// configureTrustedProxies fija la frontera de confianza para c.ClientIP().
+// Gin confía por defecto en TODOS los proxies (cualquiera podría falsificar
+// X-Forwarded-For y evadir el límite); aquí se reemplaza por la lista
+// explícita de TRUSTED_PROXIES, vacía por defecto, y solo se lee
+// X-Forwarded-For (no X-Real-IP).
+func configureTrustedProxies(router *gin.Engine, proxies []string) {
+	router.RemoteIPHeaders = []string{"X-Forwarded-For"}
+	if err := router.SetTrustedProxies(proxies); err != nil {
+		slog.Error("TRUSTED_PROXIES inválido; no se confía en ningún proxy", "error", err)
+		_ = router.SetTrustedProxies(nil)
+	}
+}
+
 func (h *Handler) health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "service": "api-inventario"})
 }
@@ -73,7 +113,7 @@ func (h *Handler) health(c *gin.Context) {
 func (h *Handler) ready(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
 	defer cancel()
-	if err := h.store.Ping(ctx); err != nil {
+	if err := h.store.ReadyMigrado(ctx); err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable", "service": "api-inventario"})
 		return
 	}
@@ -289,28 +329,29 @@ func writeValidationError(c *gin.Context, field, message string) {
 }
 
 func decodeJSON(c *gin.Context, destination any) bool {
-    if c.Request.ContentLength > 262144 {
-        writeError(c, http.StatusRequestEntityTooLarge, "Cuerpo demasiado grande.", nil)
-        return false
-    }
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 262144)
-	decoder := json.NewDecoder(c.Request.Body)
+	if c.Request.ContentLength > maxBodyBytes {
+		writeError(c, http.StatusRequestEntityTooLarge, "Cuerpo demasiado grande.", nil)
+		return false
+	}
+	// Se comprueba el tamaño antes de analizar JSON también con longitud
+	// desconocida, aunque el cuerpo empiece con JSON inválido.
+	body, err := io.ReadAll(http.MaxBytesReader(c.Writer, c.Request.Body, maxBodyBytes))
+	if err != nil {
+		var sizeError *http.MaxBytesError
+		if errors.As(err, &sizeError) {
+			writeError(c, http.StatusRequestEntityTooLarge, "Cuerpo demasiado grande.", nil)
+			return false
+		}
+		writeError(c, http.StatusBadRequest, "No se pudo leer el cuerpo de la solicitud.", nil)
+		return false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(destination); err != nil {
-        var sizeError *http.MaxBytesError
-        if errors.As(err, &sizeError) {
-            writeError(c, http.StatusRequestEntityTooLarge, "Cuerpo demasiado grande.", nil)
-            return false
-        }
 		writeError(c, http.StatusBadRequest, "El cuerpo debe ser JSON válido y respetar el contrato.", nil)
 		return false
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-        var sizeError *http.MaxBytesError
-        if errors.As(err, &sizeError) {
-            writeError(c, http.StatusRequestEntityTooLarge, "Cuerpo demasiado grande.", nil)
-            return false
-        }
 		writeError(c, http.StatusBadRequest, "La solicitud debe contener un solo objeto JSON.", nil)
 		return false
 	}
@@ -341,9 +382,12 @@ func writeStoreError(c *gin.Context, err error) {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(c, http.StatusNotFound, "Recurso no encontrado.", nil)
 	case errors.Is(err, store.ErrInsufficientStock):
-        writeError(c, http.StatusConflict, "Inventario insuficiente.", map[string][]string{"stock": {"stock_insuficiente"}})
-    case errors.Is(err, store.ErrConflict):
-		writeError(c, http.StatusConflict, "La clave de idempotencia ya se usó con otros datos.", nil)
+		writeError(c, http.StatusConflict, "Inventario insuficiente.", map[string][]string{"stock": {"stock_insuficiente"}})
+	case errors.Is(err, store.ErrIdempotencyConflict):
+		writeError(c, http.StatusConflict, "La clave de idempotencia ya se usó con otros datos.",
+			map[string][]string{"idempotency_key": {"conflicto_idempotencia"}})
+	case errors.Is(err, store.ErrConflict):
+		writeError(c, http.StatusConflict, "La operación es incompatible con el estado actual del inventario.", nil)
 	case errors.Is(err, store.ErrInProgress):
 		writeError(c, http.StatusServiceUnavailable, "La operación sigue en curso; puede reintentarse con la misma clave.", nil)
 	default:

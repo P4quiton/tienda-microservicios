@@ -36,11 +36,23 @@ php artisan serve --host=0.0.0.0 --port=8002
 | GET | `/api/productos/{id}` | Público; UUID |
 | POST | `/api/productos` | JWT RS256 con rol `admin` |
 | GET | `/health` | Liveness; no consulta PostgreSQL |
-| GET | `/ready` | Readiness; verifica conexión PostgreSQL |
+| GET | `/ready` | Readiness; verifica PostgreSQL, tabla `productos` y clave pública RSA de al menos 3072 bits |
 
 El catálogo usa página `1` y límite `20` por defecto; el límite máximo es `100`. La búsqueda consulta nombre y descripción. El alta requiere `nombre`, `descripcion`, `precio`, `categoria` e `imagen_url`. El precio es una cadena decimal positiva con dos posiciones. Se rechazan campos adicionales. JWT valida firma RS256, emisor, audiencia, expiración, emisión, UUID v4 de `sub` y rol. Configura `JWT_ISSUER`, `JWT_AUDIENCE` y `JWT_PUBLIC_KEY_PATH` con los valores acordados con Usuarios.
 
 Todas las respuestas de negocio usan `success`, `message` y `data`; los errores usan `success`, `message` y `errors`. El contrato está en [`../docs/api/productos.yaml`](../docs/api/productos.yaml).
+
+El catálogo y el detalle comparten 120 consultas GET por minuto. Las mutaciones tienen una cuota de 30 por minuto, que incluye intentos sin credenciales válidas. Ambas cuotas se aplican por IP efectiva y devuelven `429` JSON con `Retry-After`. En Compose, el caché de archivos mantiene los contadores de cada instancia.
+
+`TRUSTED_PROXIES` acepta IPs y rangos CIDR de proxies controlados, separados por comas. Solo esos proxies pueden aportar `X-Forwarded-For`. Con la lista vacía se usa la IP de la conexión, que detrás de Nginx corresponde al proxy. Los comodines y prefijos `/0` se ignoran. Las rutas actuales son públicas o administrativas mediante JWT.
+
+Laravel devuelve `413` JSON cuando `Content-Length` supera `post_max_size`. El acceso a través de Nginx tiene su propio límite de 256 KiB.
+
+## CORS
+
+`CORS_ALLOWED_ORIGINS` acepta orígenes completos (esquema, host y puerto) separados por comas. El valor por defecto es vacío: ningún origen cruzado recibe `Access-Control-Allow-Origin`. El `*` y los patrones se ignoran.
+
+En Compose, el frontend se sirve por Nginx en `http://localhost:4200` y llama a la API por rutas relativas `/api/productos`, que Nginx reenvía a este servicio. Es el mismo origen, así que **no se necesita CORS** y `CORS_ALLOWED_ORIGINS` queda vacío. Solo hace falta un origen explícito si otro cliente de navegador (por ejemplo, un `ng serve` en `http://localhost:4200` que llame directamente a `localhost:8002`) consume la API. Ese origen debe añadirse a la lista, nunca `*`.
 
 ## Pruebas
 
@@ -72,8 +84,8 @@ docker run --rm --name api-productos \
   -e APP_DEBUG=false \
   -e DB_HOST=postgres \
   -e DB_PORT=5432 \
-  -e JWT_PUBLIC_KEY_PATH=/run/secrets/jwt_public_key \
-  --mount type=bind,src=/ruta/segura/jwt-public.pem,dst=/run/secrets/jwt_public_key,readonly \
+  -e JWT_PUBLIC_KEY_PATH=/run/secrets/jwt-public.pem \
+  --mount type=bind,src=/ruta/segura/jwt-public.pem,dst=/run/secrets/jwt-public.pem,readonly \
   api-productos:local
 ```
 

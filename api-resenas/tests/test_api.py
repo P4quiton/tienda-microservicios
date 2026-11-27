@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -5,9 +6,11 @@ import mongomock
 import pytest
 import jwt
 from fastapi.testclient import TestClient
+from pymongo.errors import ServerSelectionTimeoutError
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+import app.main as main_module
 from app.config import Settings
 from app.main import create_app
 
@@ -28,7 +31,7 @@ class FakeProductVerifier:
 
 
 @pytest.fixture
-def api_client(tmp_path):
+def api_settings(tmp_path):
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public_key_path = tmp_path / "jwt-public.pem"
     public_key_path.write_bytes(
@@ -51,6 +54,12 @@ def api_client(tmp_path):
         jwt_public_key_path=str(public_key_path),
         productos_api_url="http://productos.test",
     )
+    return settings, private_key
+
+
+@pytest.fixture
+def api_client(api_settings):
+    settings, private_key = api_settings
     verifier = FakeProductVerifier()
     app = create_app(
         settings,
@@ -126,7 +135,72 @@ def test_duplicate_user_product_pair_returns_conflict(api_client):
     assert response.status_code == 409
 
 
-def test_post_requires_auth_and_rejects_user_id_from_body(api_client):
+def test_concurrent_duplicate_user_product_returns_one_created_and_conflicts(api_client):
+    client, private_key, _ = api_client
+    user_id = uuid4()
+    headers = {"Authorization": f"Bearer {access_token(private_key, subject=user_id)}"}
+    body = {"producto_id": str(uuid4()), "calificacion": 5, "comentario": "Muy bien"}
+
+    def submit_review(_):
+        return client.post("/api/resenas", headers=headers, json=body)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        responses = list(pool.map(submit_review, range(8)))
+
+    statuses = [response.status_code for response in responses]
+    assert statuses.count(201) == 1
+    assert statuses.count(409) == 7
+
+
+def test_mutation_limit_is_thirty_per_minute(api_client):
+    client, private_key, _ = api_client
+    headers = {"Authorization": f"Bearer {access_token(private_key)}"}
+    responses = [
+        client.post(
+            "/api/resenas",
+            headers=headers,
+            json={"producto_id": str(uuid4()), "calificacion": 4, "comentario": "Bien"},
+        )
+        for _ in range(31)
+    ]
+
+    assert all(response.status_code == 201 for response in responses[:30])
+    assert responses[30].status_code == 429
+    assert int(responses[30].headers["Retry-After"]) >= 1
+
+
+def test_create_without_usuario_id_uses_jwt_subject(api_client):
+    client, private_key, _ = api_client
+    user_id = uuid4()
+    response = client.post(
+        "/api/resenas",
+        headers={"Authorization": f"Bearer {access_token(private_key, subject=user_id)}"},
+        json={"producto_id": str(uuid4()), "calificacion": 4, "comentario": "Bien"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["data"]["usuario_id"] == str(user_id)
+
+
+def test_create_accepts_usuario_id_equal_to_jwt_subject(api_client):
+    client, private_key, _ = api_client
+    user_id = uuid4()
+    response = client.post(
+        "/api/resenas",
+        headers={"Authorization": f"Bearer {access_token(private_key, subject=user_id)}"},
+        json={
+            "producto_id": str(uuid4()),
+            "usuario_id": str(user_id),
+            "calificacion": 4,
+            "comentario": "Bien",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["data"]["usuario_id"] == str(user_id)
+
+
+def test_post_requires_auth_and_rejects_other_user_id(api_client):
     client, private_key, _ = api_client
     body = {"producto_id": str(uuid4()), "calificacion": 4, "comentario": "Bien"}
     assert client.post("/api/resenas", json=body).status_code == 401
@@ -137,7 +211,9 @@ def test_post_requires_auth_and_rejects_user_id_from_body(api_client):
         headers={"Authorization": f"Bearer {token}"},
         json={**body, "usuario_id": str(uuid4())},
     )
-    assert response.status_code == 422
+    assert response.status_code == 403
+    assert "usuario_no_coincide" in response.json()["errors"]
+    assert client.get(f"/api/resenas/producto/{body['producto_id']}").json()["data"]["total"] == 0
 
 
 def test_bad_json_and_non_v4_product_id_use_api_error_envelope(api_client):
@@ -177,3 +253,52 @@ def test_product_not_found_and_unavailable_are_reported(api_client):
     assert client.post("/api/resenas", headers=headers, json=body).status_code == 404
     verifier.result = "unavailable"
     assert client.post("/api/resenas", headers=headers, json=body).status_code == 503
+
+
+def test_mongo_outage_keeps_liveness_and_readiness_recovers(api_settings, monkeypatch):
+    settings, private_key = api_settings
+    backing_client = mongomock.MongoClient()
+    available = False
+    create_indexes = main_module.ensure_review_indexes
+
+    def ensure_indexes(collection):
+        if not available:
+            raise ServerSelectionTimeoutError("MongoDB temporalmente fuera de servicio")
+        create_indexes(collection)
+
+    monkeypatch.setattr(main_module, "ensure_review_indexes", ensure_indexes)
+
+    class Admin:
+        def command(self, command):
+            if not available:
+                raise ServerSelectionTimeoutError("MongoDB temporalmente fuera de servicio")
+            return backing_client.admin.command(command)
+
+    class MongoProxy:
+        admin = Admin()
+
+        def __getitem__(self, name):
+            return backing_client[name]
+
+    app = create_app(settings, mongo_client=MongoProxy(), product_verifier=FakeProductVerifier())
+    with TestClient(app) as client:
+        token = access_token(private_key)
+        headers = {"Authorization": f"Bearer {token}"}
+        body = {"producto_id": str(uuid4()), "calificacion": 4, "comentario": "Bien"}
+
+        assert client.get("/health").status_code == 200
+        assert client.get("/ready").status_code == 503
+        assert client.post("/api/resenas", headers=headers, json=body).status_code == 503
+
+        available = True
+        assert client.post("/api/resenas", headers=headers, json=body).status_code == 503
+        assert client.get("/ready").status_code == 200
+        assert client.post("/api/resenas", headers=headers, json=body).status_code == 201
+
+        available = False
+        assert client.get("/ready").status_code == 503
+        assert client.get("/health").status_code == 200
+
+        available = True
+        assert client.get("/ready").status_code == 200
+        assert client.post("/api/resenas", headers=headers, json=body).status_code == 409

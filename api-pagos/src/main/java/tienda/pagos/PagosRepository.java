@@ -6,10 +6,13 @@ import java.security.NoSuchAlgorithmException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.OffsetDateTime;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.MigrationInfoService;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,9 +20,11 @@ import org.springframework.transaction.annotation.Transactional;
 @Repository
 class PagosRepository {
     private final JdbcClient jdbc;
+    private final Flyway flyway;
 
-    PagosRepository(JdbcClient jdbc) {
+    PagosRepository(JdbcClient jdbc, Flyway flyway) {
         this.jdbc = jdbc;
+        this.flyway = flyway;
     }
 
     @Transactional
@@ -48,9 +53,16 @@ class PagosRepository {
             .query((row, number) -> read(row)).optional();
     }
 
+    /** Listo = BD accesible, tabla de pagos consultable y migraciones Flyway aplicadas sin pendientes ni fallos. */
     boolean ready() {
         jdbc.sql("SELECT 1 FROM pagos LIMIT 0").query(Integer.class).list();
-        return true;
+        return migracionesAplicadas(flyway.info());
+    }
+
+    static boolean migracionesAplicadas(MigrationInfoService info) {
+        return info.current() != null
+            && info.pending().length == 0
+            && Arrays.stream(info.all()).noneMatch(migracion -> migracion.getState().isFailed());
     }
 
     static String simulate(String metodoPago) {

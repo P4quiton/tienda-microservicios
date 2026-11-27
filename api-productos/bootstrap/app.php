@@ -20,6 +20,11 @@ return Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        $trustedProxies = require __DIR__.'/../config/trustedproxy.php';
+        $middleware->trustProxies(
+            at: $trustedProxies['proxies'],
+            headers: Request::HEADER_X_FORWARDED_FOR,
+        );
         $middleware->alias([
             'admin.jwt' => VerifyAdminJwt::class,
         ]);
@@ -50,6 +55,7 @@ return Application::configure(basePath: dirname(__DIR__))
             $message = match ($status) {
                 404 => 'Recurso no encontrado.',
                 405 => 'Método no permitido.',
+                429 => 'Demasiadas solicitudes. Intenta más tarde.',
                 default => $status >= 500 ? 'Error interno.' : 'Solicitud no válida.',
             };
 
@@ -57,7 +63,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 'success' => false,
                 'message' => $message,
                 'errors' => (object) [],
-            ], $status);
+            ], $status, $exception->getHeaders());
         });
 
         $exceptions->render(function (ModelNotFoundException $exception, Request $request) {

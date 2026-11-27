@@ -9,6 +9,8 @@ class ReviewCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     producto_id: UUID
+    # Opcional. El autor siempre sale del sub del JWT; si se envía debe coincidir con él.
+    usuario_id: UUID | None = None
     calificacion: Annotated[int, Field(strict=True, ge=1, le=5)]
     comentario: Annotated[str, Field(max_length=1000)]
 

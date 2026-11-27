@@ -25,10 +25,14 @@ RUN mkdir -p storage/framework/cache/data storage/framework/sessions storage/fra
     && php artisan package:discover --ansi \
     && chown -R app:app storage bootstrap/cache
 
+COPY docker/entrypoint.sh /usr/local/bin/api-productos-entrypoint
+RUN chmod 0755 /usr/local/bin/api-productos-entrypoint
+
 USER app
 EXPOSE 8002
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD wget -q -O /dev/null http://127.0.0.1:8002/health || exit 1
 
+ENTRYPOINT ["api-productos-entrypoint"]
 CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8002"]

@@ -5,6 +5,7 @@ import { SessionService } from '../core/auth/session.service';
 import { toApiProblem } from '../core/api/api-error';
 import { ComprobantePago, CotizacionEnvio, Direccion, ItemCarrito, MetodoPago, Pedido, Producto, RastreoEnvio, ResumenResenas } from './models';
 import { TiendaDatos } from './tienda-datos';
+import { generarIdentificador } from '../shared/generar-identificador';
 
 /**
  * Adaptador entre la interfaz de las vistas y los contratos HTTP v1.
@@ -55,7 +56,7 @@ export class HttpTiendaDatos implements TiendaDatos {
   async agregarAlCarrito(item: ItemCarrito): Promise<ItemCarrito[]> {
     const userId = this.requireUserId();
     const fingerprint = JSON.stringify([userId, item.producto_id, item.cantidad]);
-    const key = this.cartAddKeys.get(fingerprint) ?? crypto.randomUUID();
+    const key = this.cartAddKeys.get(fingerprint) ?? generarIdentificador();
     this.cartAddKeys.set(fingerprint, key);
     try {
       const cart = await this.execute(this.api.addToCart(userId, item.producto_id, item.cantidad, key));
@@ -74,7 +75,7 @@ export class HttpTiendaDatos implements TiendaDatos {
   }
 
   async crearPedido(direccion: Direccion, metodo: MetodoPago): Promise<Pedido> {
-    this.checkoutKey ??= crypto.randomUUID();
+    this.checkoutKey ??= generarIdentificador();
     try {
       const pedido = await this.execute(this.api.createOrder({ direccion, metodo_pago: metodo }, this.checkoutKey));
       this.checkoutKey = null;

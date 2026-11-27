@@ -501,26 +501,127 @@ final class QaHostilTest extends TestCase
             $usuario = $servicios->usuario;
             $servicios->sinStock = $paso === 'sin_stock';
             if ($paso === 'carrito_desactualizado') {
-                $servicios->antes['carrito.iniciar'] = fn () => $servicios->version++;
+                $servicios->fallos['carrito.iniciar'] = [409];
             }
             $token = $this->jwt($this->claims([], $usuario));
+            $clave = (string) Str::uuid();
             $cuerpo = array_replace($this->cuerpoValido(), ['metodo_pago' => 'transferencia_simulada']);
             try {
-                $this->crear($cuerpo, null, $token)->assertStatus(409);
+                $respuesta = $this->crear($cuerpo, $clave, $token);
+                $respuesta->assertStatus($paso === 'sin_stock' ? 409 : 503);
                 $pedido = Pedido::where('usuario_id', $usuario)->sole();
-                $this->assertSame($paso, $pedido->paso);
-                $detalle = $this->withToken($token)->getJson("/api/pedidos/{$pedido->id}")
-                    ->assertOk()
-                    ->assertJsonStructure(['data' => ['pago_id', 'guia']])
-                    ->assertJsonPath('data.estado', 'cancelado')
-                    ->assertJsonPath('data.pago_id', null)
-                    ->assertJsonPath('data.guia', null)
-                    ->assertJsonPath('data.metodo_pago', 'transferencia_simulada');
-                $this->withToken($token)->getJson("/api/pedidos/usuario/$usuario")
-                    ->assertOk()->assertExactJson(array_replace($detalle->json(), ['data' => [$detalle->json('data')]]));
+                if ($paso === 'sin_stock') {
+                    $this->assertSame($paso, $pedido->paso);
+                    $detalle = $this->withToken($token)->getJson("/api/pedidos/{$pedido->id}")
+                        ->assertOk()
+                        ->assertJsonStructure(['data' => ['pago_id', 'guia']])
+                        ->assertJsonPath('data.estado', 'cancelado')
+                        ->assertJsonPath('data.pago_id', null)
+                        ->assertJsonPath('data.guia', null)
+                        ->assertJsonPath('data.metodo_pago', 'transferencia_simulada');
+                    $this->withToken($token)->getJson("/api/pedidos/usuario/$usuario")
+                        ->assertOk()->assertExactJson(array_replace($detalle->json(), ['data' => [$detalle->json('data')]]));
+                } else {
+                    $this->assertSame('pendiente', $pedido->estado);
+                    $this->assertSame('por_iniciar_carrito', $pedido->paso);
+                    $this->assertNull($pedido->pago_id);
+                    $this->assertNull($pedido->guia);
+                    $this->assertSame(0, $servicios->cuenta('inventario.reservar'));
+                    $this->assertSame(0, $servicios->cuenta('pagos.procesar'));
+                    $this->withToken($token)->getJson("/api/pedidos/{$pedido->id}")
+                        ->assertOk()->assertJsonPath('data.estado', 'pendiente')
+                        ->assertJsonPath('data.pago_id', null)->assertJsonPath('data.guia', null);
+
+                    $this->crear($cuerpo, $clave, $token)->assertStatus(201);
+                    $pedido->refresh();
+                    $this->assertSame('pagado', $pedido->estado);
+                    $this->assertSame('terminado', $pedido->paso);
+                    $this->assertSame(1, $servicios->cuenta('pagos.procesar'));
+                }
             } finally {
                 Pedido::where('usuario_id', $usuario)->delete();
             }
+        }
+    }
+
+    public function test_conflicto_de_checkout_activo_en_carrito_deja_pedido_pendiente_y_reintentable(): void
+    {
+        $this->postgres();
+        $s = ServiciosFalsos::nuevo()->instalar();
+        $s->fallos['carrito.iniciar'] = [409];
+        $token = $this->jwt($this->claims([], $s->usuario));
+        $clave = (string) Str::uuid();
+        $cuerpo = $this->cuerpoValido();
+
+        try {
+            $this->crear($cuerpo, $clave, $token)->assertStatus(503);
+            $pedido = Pedido::where('usuario_id', $s->usuario)->sole();
+            $this->assertSame('pendiente', $pedido->estado);
+            $this->assertSame('por_iniciar_carrito', $pedido->paso);
+            $this->assertSame(1, $pedido->intentos);
+            $this->assertSame(0, $s->cuenta('inventario.reservar'));
+            $this->assertSame(0, $s->cuenta('pagos.procesar'));
+
+            $this->crear($cuerpo, $clave, $token)->assertStatus(201);
+            $pedido->refresh();
+            $this->assertSame('pagado', $pedido->estado);
+            $this->assertSame('terminado', $pedido->paso);
+            $this->assertSame(2, $s->cuenta('carrito.iniciar'));
+        } finally {
+            Pedido::where('usuario_id', $s->usuario)->delete();
+        }
+    }
+
+    public function test_conflicto_generico_y_503_de_inventario_reanudan_el_mismo_checkout(): void
+    {
+        $this->postgres();
+        $s = ServiciosFalsos::nuevo()->instalar();
+        $s->fallos['inventario.reservar'] = [409, 503];
+        $s->fallos['inventario.confirmar'] = [503];
+        $token = $this->jwt($this->claims([], $s->usuario));
+        $clave = (string) Str::uuid();
+        $cuerpo = $this->cuerpoValido();
+
+        try {
+            $this->crear($cuerpo, $clave, $token)->assertStatus(503);
+            $pedido = Pedido::where('usuario_id', $s->usuario)->sole();
+            $this->assertSame('pendiente', $pedido->estado);
+            $this->assertSame('por_reservar', $pedido->paso);
+            $this->assertSame(1, $pedido->intentos);
+            $this->crear($cuerpo, $clave, $token)->assertStatus(503);
+            $pedido->refresh();
+            $this->assertSame('pendiente', $pedido->estado);
+            $this->assertSame('por_reservar', $pedido->paso);
+            $this->assertSame(2, $pedido->intentos);
+            $this->assertNull($pedido->pago_id);
+            $this->assertSame(0, $s->cuenta('pagos.procesar'));
+            $this->assertSame(0, $s->cuenta('carrito.liberar'));
+            $this->assertSame(0, $s->cuenta('inventario.liberar'));
+
+            $pedido->update(['proximo_intento' => now()->subSecond()]);
+            $this->assertSame(0, Artisan::call('pedidos:recuperar'));
+            $pedido->refresh();
+            $this->assertSame('pagado', $pedido->estado);
+            $this->assertSame('por_confirmar_reserva', $pedido->paso);
+            $this->assertSame($s->pagoId, $pedido->pago_id);
+
+            $pedido->update(['proximo_intento' => now()->subSecond()]);
+            $this->assertSame(0, Artisan::call('pedidos:recuperar'));
+            $this->crear($cuerpo, $clave, $token)->assertCreated()
+                ->assertJsonPath('data.id', $pedido->id)->assertJsonPath('data.pago_id', $s->pagoId);
+            $this->assertSame($pedido->id, Pedido::where('usuario_id', $s->usuario)->sole()->id);
+            $this->assertSame('terminado', $pedido->fresh()->paso);
+            $this->assertSame(1, $s->cuenta('pagos.procesar'));
+            $this->assertSame(1, $s->cuenta('envios.generar'));
+
+            $reservas = $s->de('inventario.reservar');
+            $this->assertSame([$pedido->id, $pedido->id, $pedido->id], array_column($reservas, 'idempotencia'));
+            $this->assertSame([$reservas[0]['cuerpo'], $reservas[0]['cuerpo'], $reservas[0]['cuerpo']], array_column($reservas, 'cuerpo'));
+            $confirmar = $pedido->clave('confirmar');
+            $this->assertNotSame($pedido->id, $confirmar);
+            $this->assertSame([$confirmar, $confirmar], array_column($s->de('inventario.confirmar'), 'idempotencia'));
+        } finally {
+            Pedido::where('usuario_id', $s->usuario)->delete();
         }
     }
 

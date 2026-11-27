@@ -138,10 +138,19 @@ services:
       JWT_PRIVATE_KEY_PATH: /run/secrets/jwt-private.pem
       JWT_PUBLIC_KEY_PATH: /run/secrets/jwt-public.pem
 
+      TRUSTED_PROXIES: "172.28.0.0/16"
+
       CORS_ALLOWED_ORIGINS: ""
 
     ports:
       - "127.0.0.1:${USUARIOS_HOST_PORT:-8001}:8001"
+    # Readiness para depends_on: el HEALTHCHECK del Dockerfile usa /health (liveness).
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:8001/ready') === false ? 1 : 0);"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
     volumes:
       - ./api-usuarios/storage/keys/jwt-private.pem:/run/secrets/jwt-private.pem:ro
@@ -156,6 +165,7 @@ services:
 
   api-productos:
     image: tienda/api-productos:1.0.0
+    init: true  # PID 1 con tini: php artisan serve no reenvia SIGTERM; apagado limpio
     build: ./api-productos
     restart: unless-stopped
     environment:
@@ -176,11 +186,21 @@ services:
       QUEUE_CONNECTION: sync
       JWT_ISSUER: api-usuarios
       JWT_AUDIENCE: tienda-microservicios
-      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt-public.pem
+      TRUSTED_PROXIES: "172.28.0.0/16"
+      # Frontend llega por Nginx (mismo origen): sin orígenes cruzados.
+      CORS_ALLOWED_ORIGINS: ""
     volumes:
-      - ./api-usuarios/storage/keys/jwt-public.pem:/run/secrets/jwt_public_key:ro
+      - ./api-usuarios/storage/keys/jwt-public.pem:/run/secrets/jwt-public.pem:ro
     ports:
       - "127.0.0.1:8002:8002"
+    # Readiness para depends_on: el HEALTHCHECK del Dockerfile usa /health (liveness).
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8002/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
@@ -210,12 +230,20 @@ services:
       ENVIOS_ENTREGA_SEGUNDOS: ${ENVIOS_ENTREGA_SEGUNDOS:-60}
       RATE_LIMIT_CONSULTA_POR_MIN: 120
       RATE_LIMIT_MUTACION_POR_MIN: 30
+      RATE_LIMIT_CHECKOUT_POR_MIN: 5
       RATE_LIMIT_INTERNA_POR_MIN: 300
       MAX_JSON_BYTES: 262144
     volumes:
       - ./api-usuarios/storage/keys/jwt-public.pem:/run/secrets/jwt-public.pem:ro
     ports:
       - "127.0.0.1:8003:8003"
+    # Readiness para depends_on: el HEALTHCHECK del Dockerfile usa /health (liveness).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8003/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
@@ -237,13 +265,25 @@ services:
       DB_SSLMODE: disable
       JWT_ISSUER: api-usuarios
       JWT_AUDIENCE: tienda-microservicios
-      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt_public_key
-      PEDIDOS_SERVICE_TOKEN: ${SERVICE_TOKEN_PEDIDOS_INVENTARIO:?Required}
+      JWT_PUBLIC_KEY_PATH: /run/secrets/jwt-public.pem
+      SERVICE_TOKEN_PEDIDOS_INVENTARIO: ${SERVICE_TOKEN_PEDIDOS_INVENTARIO:?Required}
       PRODUCTOS_API_BASE_URL: http://api-productos:8002
+      RATE_LIMIT_CONSULTA_POR_MIN: 120
+      RATE_LIMIT_MUTACION_POR_MIN: 30
+      RATE_LIMIT_INTERNA_POR_MIN: 300
+      RATE_LIMIT_MAX_CLIENTES: 10000
+      TRUSTED_PROXIES: "172.28.0.0/16"
     volumes:
-      - ./api-usuarios/storage/keys/jwt-public.pem:/run/secrets/jwt_public_key:ro
+      - ./api-usuarios/storage/keys/jwt-public.pem:/run/secrets/jwt-public.pem:ro
     ports:
       - "127.0.0.1:8004:8004"
+    # Readiness para depends_on: el HEALTHCHECK del Dockerfile usa /health (liveness).
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8004/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
@@ -266,6 +306,7 @@ services:
       SERVICE_TOKEN_PEDIDOS_CARRITO: ${SERVICE_TOKEN_PEDIDOS_CARRITO:?Required}
       API_PRODUCTOS_URL: http://api-productos:8002
       API_INVENTARIO_URL: http://api-inventario:8004
+      TRUSTED_PROXIES: "172.28.0.0/16"
       RATE_LIMIT_CONSULTA_POR_MIN: 120
       RATE_LIMIT_MUTACION_POR_MIN: 30
       RATE_LIMIT_INTERNA_POR_MIN: 300
@@ -292,6 +333,7 @@ services:
 
   api-pedidos:
     image: tienda/api-pedidos:1.0.0
+    init: true  # PID 1 con tini: php artisan serve no reenvia SIGTERM; apagado limpio
     build: ./api-pedidos
     restart: unless-stopped
     environment:
@@ -321,6 +363,7 @@ services:
       SERVICE_TOKEN_PEDIDOS_ENVIOS: ${SERVICE_TOKEN_PEDIDOS_ENVIOS:?Required}
       SERVICE_TOKEN_PAGOS_PEDIDOS: ${SERVICE_TOKEN_PAGOS_PEDIDOS:?Required}
       SERVICE_TOKEN_ENVIOS_PEDIDOS: ${SERVICE_TOKEN_ENVIOS_PEDIDOS:?Required}
+      CORS_ALLOWED_ORIGINS: ""
       RATE_LIMIT_CONSULTA_POR_MIN: 120
       RATE_LIMIT_MUTACION_POR_MIN: 30
       RATE_LIMIT_CHECKOUT_POR_MIN: 5
@@ -363,6 +406,7 @@ services:
       SERVICE_TOKEN_PAGOS_PEDIDOS: ${SERVICE_TOKEN_PAGOS_PEDIDOS:?Required}
       RATE_LIMIT_CONSULTA_POR_MIN: 120
       RATE_LIMIT_MUTACION_POR_MIN: 30
+      RATE_LIMIT_CHECKOUT_POR_MIN: 5
       RATE_LIMIT_INTERNA_POR_MIN: 300
       MAX_JSON_BYTES: 262144
     volumes:
@@ -406,10 +450,18 @@ services:
       JWT_AUDIENCE: tienda-microservicios
       JWT_PUBLIC_KEY_PATH: /run/secrets/jwt-public.pem
       API_PRODUCTOS_URL: http://api-productos:8002
+      TRUSTED_PROXIES: "172.28.0.0/16"
     volumes:
       - ./api-usuarios/storage/keys/jwt-public.pem:/run/secrets/jwt-public.pem:ro
     ports:
       - "127.0.0.1:8008:8008"
+    # Readiness para depends_on: el HEALTHCHECK del Dockerfile usa /health (liveness).
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; urlopen('http://127.0.0.1:8008/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     depends_on:
       mongodb:
         condition: service_healthy
@@ -434,10 +486,15 @@ services:
     networks:
       - red-tienda
 
+# Subred fija: TRUSTED_PROXIES de Usuarios, Productos, Carrito, Inventario y Reseñas
+# confia en este rango, donde esta el Nginx del frontend. No usar 0.0.0.0/0 ni ::/0.
 networks:
   red-tienda:
     name: red-tienda
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
 
 volumes:
   postgres_data:

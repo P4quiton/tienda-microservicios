@@ -17,6 +17,8 @@ import (
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
 
+const expectedMigrationVersion = 2
+
 type Postgres struct {
 	pool *pgxpool.Pool
 }
@@ -67,6 +69,24 @@ func Open(ctx context.Context, host, port, database, user, password, sslMode str
 
 func (p *Postgres) Ping(ctx context.Context) error {
 	return p.pool.Ping(ctx)
+}
+
+// ReadyMigrado confirma que PostgreSQL responde y que está aplicada la última
+// migración que necesita el servicio.
+func (p *Postgres) ReadyMigrado(ctx context.Context) error {
+	if err := p.Ping(ctx); err != nil {
+		return err
+	}
+	var applied bool
+	if err := p.pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM schema_migrations WHERE version >= $1
+	)`, expectedMigrationVersion).Scan(&applied); err != nil {
+		return fmt.Errorf("consultar migración esperada %d: %w", expectedMigrationVersion, err)
+	}
+	if !applied {
+		return fmt.Errorf("no está aplicada la migración esperada %d", expectedMigrationVersion)
+	}
+	return nil
 }
 
 func (p *Postgres) Close() {

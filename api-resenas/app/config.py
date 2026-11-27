@@ -16,6 +16,7 @@ class Settings:
     jwt_audience: str
     jwt_public_key_path: str
     productos_api_url: str
+    trusted_proxy_cidrs: str = ""
 
 
 def load_settings() -> Settings:
@@ -34,4 +35,5 @@ def load_settings() -> Settings:
         productos_api_url=os.getenv(
             "API_PRODUCTOS_URL", "http://127.0.0.1:8002"
         ).rstrip("/"),
+        trusted_proxy_cidrs=os.getenv("TRUSTED_PROXIES", ""),
     )

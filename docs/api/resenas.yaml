@@ -1,8 +1,8 @@
 openapi: 3.0.3
 info:
   title: API resenas
-  version: 1.0.0
-  description: Python / FastAPI / MongoDB | Contrato inicial propuesto y aprobado a nivel de arquitectura.
+  version: 1.1.0
+  description: Python / FastAPI / MongoDB | Contrato inicial propuesto y aprobado a nivel de arquitectura. Revisión 1.1.0 (usuario_id opcional en el cuerpo de POST).
 servers:
 - url: http://localhost:8008
   description: Desarrollo individual
@@ -142,8 +142,10 @@ paths:
   /api/resenas:
     post:
       summary: Crear reseña
-      description: JWT cliente o admin. Usuario desde sub; verificar producto; una reseña por usuario y producto
-        (409 si duplicada).
+      description: >
+        JWT cliente o admin. Usuario desde sub. usuario_id del cuerpo es opcional; si se envía y no coincide
+        con sub responde 403 con errors.usuario_no_coincide. Verificar producto; una reseña por usuario y
+        producto (409 si duplicada).
       operationId: resenas_25
       security:
       - bearerAuth: []
@@ -180,7 +182,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '403':
-          description: Permiso insuficiente
+          description: >
+            Permiso insuficiente, o usuario_id del cuerpo distinto del sub del JWT. En este último caso
+            errors contiene usuario_no_coincide (código nuevo en 1.1.0).
           content:
             application/json:
               schema:
@@ -229,6 +233,11 @@ paths:
               type: object
               properties:
                 producto_id: *id001
+                usuario_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: Opcional. Si viene debe coincidir con el sub del JWT; si no viene se usa el sub.
                 calificacion:
                   type: integer
                   minimum: 1

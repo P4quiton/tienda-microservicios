@@ -5,8 +5,18 @@ import { TIENDA_DATOS } from './datos/tienda-datos';
 import { SESION_UI } from './datos/sesion-ui';
 import { MockSesionUi } from './mock/mock-sesion-ui';
 import { MockTiendaDatos } from './mock/mock-tienda-datos';
+import { resolverModoApp } from './app.config';
 
 describe('App', () => {
+  it('usa API real por defecto', () => {
+    expect(resolverModoApp(null, null)).toBe('api');
+  });
+
+  it('activa mocks solo al solicitarlos explícitamente', () => {
+    expect(resolverModoApp('mock', null)).toBe('mock');
+    expect(resolverModoApp('api', 'mock')).toBe('api');
+  });
+
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [App],

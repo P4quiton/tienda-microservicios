@@ -1,41 +1,48 @@
-# Pruebas E2E por HTTP real
+# E2E contra Docker Compose
 
-Verifican, como lo haria un cliente con `curl`, el flujo de compra entre **Carrito (8005), Pedidos (8006), Pagos (8007) y Envios (8003)** reales. Productos (8002) e Inventario (8004) aun no existen: se sustituyen por stubs propios.
+El modo predeterminado prueba por HTTP los **ocho servicios reales** levantados por Docker Compose: Usuarios, Productos, Envíos, Inventario, Carrito, Pedidos, Pagos y Reseñas. No inicia ni detiene contenedores y no usa stubs. El resumen enumera cada escenario como `OK` o `FAIL`; el código de salida es distinto de cero si falta configuración, no responde un servicio o falla una aserción.
 
-## Ejecutar
+## Ejecución
+
+Desde la raíz del monorepo, con Compose ya levantado:
 
 ```sh
-./e2e/run.sh          # levanta todo, corre los 17 escenarios, apaga y limpia
-MANTENER=1 ./e2e/run.sh   # solo levanta (depuracion); luego ./e2e/run.sh --limpiar
+E2E_EMAIL='correo-de-prueba@example.test' E2E_PASSWORD='contraseña-de-prueba' \
+E2E_PRODUCT_ID='uuid-v4-de-producto-existente' ./e2e/run.sh
 ```
 
-Requisitos (sin `docker build` ni red): imagenes locales `postgres:17` y `pedidos-test-temporal` (PHP 8.5), Java 21 + Maven offline, Node 24, y el venv de Envios. Las rutas por defecto se pueden cambiar con `MVN`, `M2`, `ENVIOS_VENV`, `PEDIDOS_VENDOR`; `SKIP_BUILD=1` reutiliza el jar de Pagos. Si `api-carrito/` no trae `node_modules`, `run.sh` enlaza temporalmente `CARRITO_NODE_MODULES` (por defecto el del arbol `tienda/carrito`) y retira el enlace al limpiar. Codigo de salida 0 solo si todos los escenarios pasan. La salida de la ultima corrida queda en `ultima-salida.log`; el resultado analizado en `REPORTE.md`.
+`E2E_EMAIL` debe ser un correo nuevo: el escenario registra esa cuenta mediante la API de Usuarios y no reutiliza cuentas. `E2E_PASSWORD` se envía solo a Usuarios; el script nunca la muestra. `E2E_PRODUCT_ID` debe ser UUID v4 existente en Productos y con al menos una unidad disponible en Inventario. El test registra por API un segundo usuario con alias derivado del correo configurado. Antes de la compra, el segundo usuario agrega al carrito la disponibilidad observada completa; la compra del primer usuario (1 unidad) deja ese carrito sin stock suficiente al hacer checkout. No necesita una ruta de siembra ni muta inventario directamente.
 
-## Que levanta `run.sh`
+Variables opcionales:
 
-| Pieza | Como |
-|---|---|
-| PostgreSQL 17 | contenedor `mojarra-pg-e2e`, puerto 55450, datos en tmpfs, contrasena aleatoria. Usa el propio `infra/postgres/init/01-create-databases.sh` (roles `usr_*` NOSUPERUSER/NOCREATEDB, REVOKE PUBLIC). |
-| Migraciones | Carrito (`node src/migrate.js`) y Pedidos (`artisan migrate --force`) con su rol; Envios y Pagos (Flyway) migran solos al arrancar, tambien con su rol. |
-| Carrito, Envios, Pagos | procesos nativos (`node`, `uvicorn`, `java -jar`; Pagos se compila con `mvn -o package -DskipTests`). |
-| Pedidos | `docker run --rm --network host` con la imagen existente, codigo y vendor montados `:ro`, storage en tmpfs, `PHP_CLI_SERVER_WORKERS=4`. |
-| Stubs | `stubs/stub_server.py` (Productos e Inventario segun `docs/api/{productos,inventario}.yaml`: stock disponible = fisico - reservado, reservar/confirmar/liberar idempotentes con `Idempotency-Key` obligatoria, 409 si no alcanza). Las rutas `/__test/*` solo siembran datos. |
-| Proxies de fallos | `stubs/fault_proxy.py` entre Pedidos y Pagos/Carrito: `delay`, `drop_response` (el efecto ocurre, la respuesta se pierde) y `refuse`. |
-| Identidad | par RSA de prueba y secretos de servicio aleatorios (uno distinto por par) solo en `e2e/.tmp/` (ignorado por git; se borra al empezar cada corrida). JWT de cliente A, B y admin con `sub` UUID v4. |
+| Variable | Valor predeterminado | Uso |
+|---|---|---|
+| `USUARIOS_URL` ... `RESENAS_URL` | `http://127.0.0.1:8001` ... `:8008` | Sustituir individualmente el origen del servicio; por ejemplo, usar Nginx. |
+| `E2E_NOMBRE` | `Prueba E2E` | Nombre del usuario que registra la prueba. |
+| `E2E_CODIGO_POSTAL` | `06600` | Código para cotización y dirección de compra. |
 
-## Archivos
+## Escenarios incluidos
 
-- `run.sh`: orquestacion y limpieza (trap: mata procesos, `docker rm -f` del PG y de Pedidos, avisa de puertos ocupados).
-- `servicios.sh`: arrancar/matar/reiniciar cada servicio (lo usan los escenarios de caidas). `E2E_FASE=altos` (por defecto: limites 100000 y despacho de Envios a 3600 s) o `default` (sin variables de limite); `E2E_SCHEDULER=1` arranca Pedidos con el CMD del Dockerfile (recuperar + `schedule:work` + servidor).
-- `tests/e2e.py`: escenarios (solo biblioteca estandar + PyJWT del venv de Envios). Sin argumentos corre los 17; con numeros corre un subconjunto contra servicios ya arriba (`MANTENER=1 ./e2e/run.sh`, luego `python tests/e2e.py 13 14`).
-  - 13: scheduler de Pedidos sin intervencion; 14: despacho automatico de Envios (`ENVIOS_DESPACHO_SEGUNDOS=3`); 15: limites por defecto (reinicia los 4 servicios sin variables de limite; ultimo escenario). El 11 comprueba que la notificacion pendiente sobrevive a reinicios de Pedidos y Envios; ya nadie invoca `despachar` ni `pedidos:recuperar` a mano en 11, 13, 14.
-  - 16: campos del pedido por HTTP (`guia`, `pago_id`, `metodo_pago`) en 201/detalle/historial/PATCH para compra aprobada, pago rechazado, 409 por stock, idempotencia, titularidad y recuperacion de un pago incierto (Pagos `kill -9` + `pedidos:recuperar`), contrastados con Pagos, Envios y la BD de Pedidos.
-  - 17: entrega automatica de Envios (`ENVIOS_ENTREGA_SEGUNDOS`): (A) preparando -> en_transito -> entregado sin intervencion, `despachado_en` persistido, pedido sigue `enviado`, el outbox no crece por la entrega; (B) segunda instancia (`envios2`, puerto 8013, misma BD): cada envio transita una sola vez; (C) con `ENVIOS_ENTREGA_SEGUNDOS=60` no entrega antes de tiempo; (D) Envios apagado con `kill -9` mientras vence el plazo, al reiniciar entrega solo. Para probar "una sola vez" instala en el PG temporal (rol `postgres`, solo para esto) un trigger que audita cada UPDATE de `envios` y lo retira al terminar.
-  - Orden real de ejecucion: 1-14, 16, 17 y 15 al final (el 15 reinicia todo sin variables de limite, por eso va ultimo). Las fases `altos` incluyen `ENVIOS_ENTREGA_SEGUNDOS=3600`; los escenarios que prueban despacho/entrega restauran esa fase al terminar.
-  - Duracion total ~290 s.
+1. Readiness HTTP 200 en los ocho servicios.
+2. Registro por API y login con JWT RS256 emitido por Usuarios.
+3. Listado del catálogo y disponibilidad en Inventario para el producto seleccionado.
+4. Crear una reseña autenticada y verificarla en el listado público.
+5. Cotizar envío y rastrear la guía generada por la compra.
+6. Agregar al carrito usando `Idempotency-Key` UUID v4.
+7. Crear un segundo usuario y preparar un carrito competidor antes de comprar.
+8. Compra aprobada: pedido pagado, comprobante aprobado, stock descontado, carrito vacío y guía rastreable.
+9. Repetir la misma compra con la misma clave y verificar cuerpo idéntico.
+10. Falta de stock: HTTP 409 de Inventario, pedido cancelado, sin comprobante y carrito conservado. El servicio Pedidos expone actualmente el mensaje `Inventario insuficiente`, no un campo de código `stock_insuficiente`.
+11. Solicitud al carrito sin token: HTTP 401.
 
-## Notas de alcance
+El escenario opcional de exceso de límite 429 no se ejecuta: depende de los límites configurados y podría consumir cuota de la instancia compartida. `Retry-After` tampoco se comprueba.
 
-- Los escenarios consultan las BD de Pagos y Envios con el rol de cada servicio para contar pagos/guias, contrastar `pago_id` y `despachado_en` y auditar transiciones de `envios` (escenario 17: un trigger temporal en el PG efimero, retirado al terminar); todo lo demas es HTTP.
-- No se prueba Usuarios, Productos ni Inventario reales: sus stubs solo garantizan lo que el contrato exige a sus consumidores.
-- `docker pause` se aplica unicamente a `mojarra-pg-e2e`.
+## Modo legado con stubs
+
+El arnés anterior, que arranca servicios de prueba y sustituye Productos e Inventario, sigue disponible explícitamente:
+
+```sh
+./e2e/run.sh --stubs
+```
+
+Ese modo es independiente del modo Compose real y conserva sus requisitos previos documentados en `run-stubs.sh` y `servicios.sh`.

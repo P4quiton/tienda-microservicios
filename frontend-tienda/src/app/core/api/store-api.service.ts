@@ -20,6 +20,7 @@ import {
   ShippingQuote,
   UserProfile,
 } from '../models/api.models';
+import { generarIdentificador } from '../../shared/generar-identificador';
 
 @Injectable({ providedIn: 'root' })
 export class StoreApiService {
@@ -53,7 +54,7 @@ export class StoreApiService {
     return this.http.get<ApiSuccess<Cart>>(`/api/carrito/${encodeURIComponent(userId)}`).pipe(map(({ data }) => data));
   }
 
-  addToCart(userId: string, productId: string, quantity: number, idempotencyKey: string = crypto.randomUUID()): Observable<Cart> {
+  addToCart(userId: string, productId: string, quantity: number, idempotencyKey: string = generarIdentificador()): Observable<Cart> {
     return this.http.post<ApiSuccess<Cart>>(
       `/api/carrito/${encodeURIComponent(userId)}/agregar`,
       { producto_id: productId, cantidad: quantity },
@@ -65,7 +66,7 @@ export class StoreApiService {
     return this.http.post<ApiSuccess<ShippingQuote>>('/api/envios/cotizar', { codigo_postal, cantidad }).pipe(map(({ data }) => data));
   }
 
-  createOrder(input: CreateOrderRequest, idempotencyKey: string = crypto.randomUUID()): Observable<Order> {
+  createOrder(input: CreateOrderRequest, idempotencyKey: string = generarIdentificador()): Observable<Order> {
     return this.http.post<ApiSuccess<Order>>('/api/pedidos', input, {
       headers: { 'Idempotency-Key': idempotencyKey },
     }).pipe(map(({ data }) => data));

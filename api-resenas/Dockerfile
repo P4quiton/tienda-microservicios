@@ -23,4 +23,4 @@ EXPOSE 8008
 HEALTHCHECK --interval=30s --timeout=4s --start-period=10s --retries=3 \
     CMD python -c "import os; from urllib.request import urlopen; urlopen('http://127.0.0.1:' + os.getenv('PORT', '8008') + '/health', timeout=2)" || exit 1
 
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port \"${PORT:-8008}\""]
+CMD ["sh", "-c", "exec uvicorn app.main:app --no-proxy-headers --host 0.0.0.0 --port \"${PORT:-8008}\""]

@@ -7,6 +7,7 @@ import { aCentavos, deCentavos } from '../datos/dinero';
 import { ComprobantePago, CotizacionEnvio, Direccion, ItemCarrito, MetodoPago, Pedido, Producto, RastreoEnvio, ResumenResenas } from '../datos/models';
 import { TiendaDatos } from '../datos/tienda-datos';
 import { ENVIOS_DEMO, estadoEnvioDemo, guiaDemo, INVENTARIO, PAGOS_DEMO, PEDIDOS, PRODUCTOS, RESENAS, USUARIO_DEMO } from './fixtures';
+import { generarIdentificador } from '../shared/generar-identificador';
 
 const modo = () => new URLSearchParams(location.search).get('mock');
 const normalizar = (s: string) => s.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
@@ -51,7 +52,7 @@ export class MockTiendaDatos implements TiendaDatos {
 
   crearResena(r: { producto_id: string; calificacion: number; comentario: string }) {
     return this.latencia(() => {
-      this.resenasExtra.unshift({ ...r, id: crypto.randomUUID(), usuario_id: USUARIO_DEMO, creado_en: new Date().toISOString() });
+      this.resenasExtra.unshift({ ...r, id: generarIdentificador(), usuario_id: USUARIO_DEMO, creado_en: new Date().toISOString() });
     });
   }
 
@@ -81,8 +82,8 @@ export class MockTiendaDatos implements TiendaDatos {
       // Acuerdo de pagos simulados: tarjeta aprueba, transferencia rechaza.
       // Supuesto UI: un rechazo llega como pedido 'cancelado' y el carrito se conserva.
       const aprobado = metodo === 'tarjeta_simulada';
-      const id = crypto.randomUUID();
-      const pagoId = crypto.randomUUID();
+      const id = generarIdentificador();
+      const pagoId = generarIdentificador();
       const creado = new Date().toISOString();
       const total = deCentavos(subtotal + aCentavos(costo_envio));
       const pedido: Pedido = { id, usuario_id: USUARIO_DEMO, items, direccion, costo_envio, total,

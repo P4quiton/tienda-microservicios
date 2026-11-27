@@ -57,9 +57,14 @@ RUN mkdir -p \
     && chown -R www-data:www-data storage bootstrap/cache \
     && chmod -R u+rwX,g+rwX,o-rwx storage bootstrap/cache
 
+# Prepara copias legibles por www-data de las claves JWT montadas (ver docker/entrypoint.sh).
+COPY docker/entrypoint.sh /usr/local/bin/api-usuarios-entrypoint
+RUN chmod 0755 /usr/local/bin/api-usuarios-entrypoint
+
 EXPOSE 8001
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
     CMD php -r 'exit(@file_get_contents("http://127.0.0.1:8001/health") === false ? 1 : 0);'
 
+ENTRYPOINT ["api-usuarios-entrypoint"]
 CMD ["apache2-foreground"]

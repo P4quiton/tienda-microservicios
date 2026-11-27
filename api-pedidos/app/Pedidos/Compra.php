@@ -20,7 +20,8 @@ use Throwable;
  *   aprobado:  por_confirmar_reserva -> por_generar_guia -> por_finalizar_carrito -> terminado
  *   rechazado: por_liberar_reserva -> por_liberar_carrito_pago -> terminado (estado cancelado)
  *   sin stock: por_liberar_carrito_sin_stock -> sin_stock; importes fuera de rango: ... -> rango_invalido
- *   carrito cambiado al iniciar: carrito_desactualizado.
+ *   carrito_desactualizado: estado legado; el conflicto actual de /iniciar queda en por_iniciar_carrito
+ *   y responde 503 para permitir reintento. Solo el 409 explícito de stock_insuficiente cancela por inventario.
  * Regla: tras un cobro aprobado el pedido nunca se cancela; los fallos quedan pendientes (503) y se reanudan.
  * Un resultado incierto nunca se interpreta como rechazo ni libera recursos.
  */
@@ -161,16 +162,12 @@ final class Compra
                 $snapshot = $this->carrito->iniciar($pedido);
             } catch (ApiError $error) {
                 if ($error->status === 409) {
-                    // Carrito cambiado u otro checkout activo: cancelar sin cobrar ni reservar.
-                    $this->avanzar($pedido, ['paso' => 'carrito_desactualizado', 'estado' => 'cancelado']);
+                    // El contrato agrupa versión distinta y checkout activo; no son rechazo definitivo.
+                    throw new ApiError(503, 'No se pudo confirmar el inicio del checkout');
                 }
                 throw $error;
             }
             $this->avanzar($pedido, ['paso' => 'por_cotizar', 'snapshot' => $snapshot]);
-        }
-
-        if ($pedido->paso === 'carrito_desactualizado') {
-            throw new ApiError(409, 'El carrito cambió antes de iniciar la compra');
         }
 
         if ($pedido->paso === 'por_cotizar') {
@@ -223,7 +220,8 @@ final class Compra
         }
 
         if ($pedido->paso === 'sin_stock') {
-            throw new ApiError(409, 'Inventario insuficiente o reserva en conflicto');
+            // Contrato: el 409 por falta de stock expone errors.stock[0] = stock_insuficiente.
+            throw new ApiError(409, 'Inventario insuficiente o reserva en conflicto', ['stock' => ['stock_insuficiente']]);
         }
 
         if ($pedido->paso === 'por_pagar') {

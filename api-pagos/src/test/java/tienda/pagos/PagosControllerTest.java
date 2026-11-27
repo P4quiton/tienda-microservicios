@@ -50,6 +50,28 @@ class PagosControllerTest {
     }
 
     @Test
+    void readyIsOkWhenDatabaseAndMigrationsAreReady() throws Exception {
+        when(repository.ready()).thenReturn(true);
+        mvc.perform(get("/ready")).andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value("ok"))
+            .andExpect(jsonPath("$.service").value("api-pagos"));
+    }
+
+    @Test
+    void readyIsUnavailableWhenMigrationsAreNotApplied() throws Exception {
+        when(repository.ready()).thenReturn(false);
+        mvc.perform(get("/ready")).andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.status").value("unavailable"));
+    }
+
+    @Test
+    void readyIsUnavailableWhenMigrationHistoryCannotBeRead() throws Exception {
+        when(repository.ready()).thenThrow(new IllegalStateException("flyway sin acceso"));
+        mvc.perform(get("/ready")).andExpect(status().isServiceUnavailable())
+            .andExpect(jsonPath("$.status").value("unavailable"));
+    }
+
+    @Test
     void rejectsUntrustedPaymentRequest() throws Exception {
         mvc.perform(post("/api/pagos/procesar").header("X-Service-Token", "incorrecto")
                 .contentType("application/json").content("{}"))

@@ -509,8 +509,9 @@ paths:
       summary: Finalizar checkout del carrito
       description: Solo Pedidos tras pago aprobado. Verificar snapshot persistido, versión original e items exactos.
         En transacción retirar cantidades del snapshot de sus linea_id, preservar adiciones posteriores, incrementar
-        versión y cerrar checkout. No exigir igualdad con versión actual. Repetición devuelve resultado registrado
-        sin nuevos descuentos; 409 si snapshot incompatible o liberado.
+        versión y cerrar checkout. Elimina las líneas incluidas en el checkout cuando su cantidad queda agotada;
+        si no queda ninguna otra línea, el carrito queda vacío. No exigir igualdad con versión actual. Repetición
+        devuelve resultado registrado sin nuevos descuentos; 409 si snapshot incompatible o liberado.
       operationId: carrito_checkout_finalizar
       security:
       - serviceAuth: []

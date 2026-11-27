@@ -44,6 +44,12 @@ Configurables por entorno (`config/pedidos.php`, `.env.example`): `RATE_LIMIT_CO
 
 Idempotencia: las claves (`pedidos.clave_idempotencia`, `pedidos_cambios_estado`) no caducan ni se borran; es una decisión de MVP, sin expiración ni limpieza.
 
+## CORS
+
+`CORS_ALLOWED_ORIGINS` (`config/cors.php`) acepta orígenes completos separados por comas. El valor por defecto es vacío: ningún origen cruzado recibe `Access-Control-Allow-Origin`. El `*` y los patrones se ignoran.
+
+En Compose, el frontend se sirve por Nginx en `http://localhost:4200` y llama a la API por rutas relativas `/api/pedidos`, que Nginx reenvía a este servicio. Es el mismo origen, así que **no se necesita CORS** y `CORS_ALLOWED_ORIGINS` queda vacío (así lo fija `docker-compose.yml`). Solo hace falta añadir un origen explícito si otro cliente de navegador consume la API directamente; nunca `*`.
+
 ## Pruebas
 
 Ejecuta `composer test` con PHP 8.5. Los servicios externos se simulan con `Http::fake` (`tests/Support/ServiciosFalsos.php`). Para las comprobaciones de recuperación, configura una base PostgreSQL **exclusiva para pruebas** y habilita `TEST_POSTGRES=1`.

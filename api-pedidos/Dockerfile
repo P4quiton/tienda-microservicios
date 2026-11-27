@@ -17,10 +17,14 @@ RUN composer dump-autoload --optimize --no-dev --no-interaction --no-scripts
 
 FROM php-base
 COPY --from=dependencias --chown=www-data:www-data /app /app
+COPY docker/entrypoint.sh /usr/local/bin/api-pedidos-entrypoint
+RUN chmod 0755 /usr/local/bin/api-pedidos-entrypoint
 USER www-data
 # Envíos consulta Pedidos durante checkout; se necesitan solicitudes concurrentes.
 ENV PHP_CLI_SERVER_WORKERS=4
 EXPOSE 8006
 # Recuperación durable: reconcilia al arrancar y cada minuto (schedule:work, reiniciado si termina)
 # sin depender de clientes. Varias réplicas se serializan por el bloqueo advisory por usuario.
+# El entrypoint espera a PostgreSQL y migra antes del CMD.
+ENTRYPOINT ["api-pedidos-entrypoint"]
 CMD ["sh", "-c", "php artisan pedidos:recuperar; (while true; do php artisan schedule:work; sleep 5; done) & exec php artisan serve --host=0.0.0.0 --port=8006 --no-reload"]

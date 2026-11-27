@@ -5,6 +5,9 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY src ./src
 COPY migrations ./migrations
+COPY docker/entrypoint.sh /usr/local/bin/api-carrito-entrypoint
+RUN chmod 0755 /usr/local/bin/api-carrito-entrypoint
 USER node
 EXPOSE 8005
+ENTRYPOINT ["api-carrito-entrypoint"]
 CMD ["node", "src/server.js"]

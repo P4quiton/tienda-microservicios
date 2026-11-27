@@ -2,6 +2,22 @@
 
 Los YAML OpenAPI 3.0.3 son la referencia normativa de integración. Los endpoints originales se conservan; se agregan confirmar/liberar inventario, consulta individual de pedido y health/ready.
 
+## Revisión común vs revisión por API
+
+La revisión común identifica el conjunto coordinado de cambios de integración; la versión por API identifica la evolución independiente del contrato OpenAPI de cada servicio.
+
+| Alcance | Revisión común | Versión del contrato | Significado |
+|---|---:|---:|---|
+| Checkout e integración común | 1.1 | — | Revisión del flujo y de los cambios coordinados que comparten los servicios. |
+| Usuarios | 1.1 | 1.1.0 | Versión declarada en `docs/api/usuarios.yaml`. |
+| Productos | 1.1 | 1.1.0 | Versión declarada en `docs/api/productos.yaml`. |
+| Envíos | 1.1 | 1.1.0 | Versión declarada en `docs/api/envios.yaml`. |
+| Inventario | 1.1 | 1.3.0 | Versión declarada en `docs/api/inventario.yaml`. |
+| Pedidos | 1.1 | 1.2.0 | Versión declarada en `docs/api/pedidos.yaml`. |
+| Carrito | 1.1 | 1.1.0 | Versión declarada en `docs/api/carrito.yaml`. |
+| Pagos | 1.1 | 1.1.0 | Versión declarada en `docs/api/pagos.yaml`. |
+| Reseñas | 1.1 | 1.1.0 | Versión declarada en `docs/api/resenas.yaml`. |
+
 | Servicio | Método | Ruta | Acceso | Función |
 |---|---|---|---|---|
 | usuarios | POST | /api/usuarios/registro | Público | Registrar cliente |
@@ -38,7 +54,7 @@ Los YAML OpenAPI 3.0.3 son la referencia normativa de integración. Los endpoint
 - Éxito: `{"success":true,"message":"OK","data":{}}`. Error: `{"success":false,"message":"Error","errors":{}}`. Los endpoints de salud son excepción y retornan status/service.
 - 400 JSON inválido, 401 sin identidad válida, 403 sin autorización, 404 inexistente, 409 conflicto, 422 validación, 429 límite, 500 error interno, 503 dependencia o resultado incierto.
 - Idempotency-Key UUID: almacenar identidad, operación, hash de solicitud y resultado; misma clave y payload devuelve resultado previo; diferente payload 409. Una solicitud en curso devuelve 409 o 503 sin repetir efectos.
-- No confiar en usuario_id, precios, monto o rol enviados por navegador. Los campos no declarados se rechazan. Los esquemas no sustituyen las reglas de negocio descritas.
+- No confiar en usuario_id, precios, monto o rol enviados por navegador. Los campos no declarados se rechazan. En Reseñas, usuario_id es opcional y solo se acepta si coincide con el sub del JWT (403 con errors.usuario_no_coincide). Los esquemas no sustituyen las reglas de negocio descritas.
 - `/health`: proceso vivo, sin depender de BD; `/ready`: comprobar BD y retornar 503 si no está disponible.
 - Para listar catálogo: página 1 y límite 20 por defecto. Para envío, se adopta cantidad como unidad de cotización simulada; peso queda fuera del MVP.
 

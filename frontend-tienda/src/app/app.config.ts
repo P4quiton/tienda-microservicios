@@ -13,10 +13,18 @@ import { HttpSesionUi } from './datos/http-sesion-ui';
 
 const MODO_APP_KEY = 'nebula.app.mode';
 const modoSolicitado = new URLSearchParams(location.search).get('mode');
+let modoGuardado: string | null = null;
+try {
+  modoGuardado = sessionStorage.getItem(MODO_APP_KEY);
+} catch { /* El almacenamiento puede estar deshabilitado por el navegador. */ }
 if (modoSolicitado === 'api' || modoSolicitado === 'mock') {
-  sessionStorage.setItem(MODO_APP_KEY, modoSolicitado);
+  try { sessionStorage.setItem(MODO_APP_KEY, modoSolicitado); } catch { /* El parámetro de URL sigue definiendo el modo. */ }
 }
-const usarApi = (modoSolicitado ?? sessionStorage.getItem(MODO_APP_KEY)) !== 'mock';
+export function resolverModoApp(solicitado: string | null, guardado: string | null): 'api' | 'mock' {
+  return (solicitado ?? guardado) === 'mock' ? 'mock' : 'api';
+}
+
+const usarApi = resolverModoApp(modoSolicitado, modoGuardado) === 'api';
 
 export const appConfig: ApplicationConfig = {
   providers: [

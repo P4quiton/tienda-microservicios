@@ -32,8 +32,9 @@ try {
   const shutdown = () => server.close(() => void pool.end());
   process.once('SIGTERM', shutdown);
   process.once('SIGINT', shutdown);
-} catch {
+} catch (error) {
   console.error('No se pudo iniciar api-carrito. Revisa la configuración.');
+  console.error(error.message);
   await pool.end();
   process.exitCode = 1;
 }

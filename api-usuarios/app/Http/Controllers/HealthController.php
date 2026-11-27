@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Services\JwtService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 use Throwable;
 
 class HealthController extends Controller
@@ -20,7 +21,15 @@ class HealthController extends Controller
     public function ready(JwtService $jwt): JsonResponse
     {
         try {
-            DB::select('SELECT 1 FROM usuarios LIMIT 1');
+            DB::select('SELECT 1');
+
+            $migrationApplied = DB::table('migrations')
+                ->where('migration', '0001_01_01_000000_create_usuarios_table')
+                ->exists();
+
+            if (! $migrationApplied) {
+                throw new RuntimeException('La migracion de usuarios no esta aplicada.');
+            }
 
             $jwt->assertReady();
 

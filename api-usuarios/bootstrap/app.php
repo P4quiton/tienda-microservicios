@@ -20,6 +20,12 @@ return Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Solo se lee X-Forwarded-For si el socket pertenece a un proxy listado en TRUSTED_PROXIES.
+        $trustedProxies = require __DIR__.'/../config/trustedproxy.php';
+        $middleware->trustProxies(
+            at: $trustedProxies['proxies'],
+            headers: Request::HEADER_X_FORWARDED_FOR,
+        );
         $middleware->prepend(LimitRequestSize::class);
         $middleware->trimStrings(except: [
             'contrasena',

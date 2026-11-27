@@ -2,7 +2,6 @@ package tienda.pagos;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataAccessException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -58,11 +57,13 @@ class PagosController {
     @GetMapping("/ready")
     ResponseEntity<Health> ready() {
         try {
-            repository.ready();
-            return ResponseEntity.ok(health());
-        } catch (DataAccessException exception) {
-            return ResponseEntity.status(503).body(new Health("unavailable", "api-pagos"));
+            if (repository.ready()) {
+                return ResponseEntity.ok(health());
+            }
+        } catch (RuntimeException exception) {
+            // BD inaccesible (DataAccessException) o Flyway sin acceso al historial: ambos son "no listo".
         }
+        return ResponseEntity.status(503).body(new Health("unavailable", "api-pagos"));
     }
 
     record Success(boolean success, String message, Pago data) {}

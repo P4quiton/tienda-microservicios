@@ -150,31 +150,31 @@ final class CompraTest extends TestCase
         return array_values(array_unique($s->claves()));
     }
 
-    public function test_carrito_cambiado_antes_de_iniciar_da_409_sin_cobrar_ni_reservar(): void
+    public function test_carrito_cambiado_antes_de_iniciar_deja_pedido_pendiente_y_reintentable(): void
     {
         $s = $this->servicios();
-        $s->antes['carrito.iniciar'] = fn () => $s->version = 4; // alguien agregó tras la lectura
-        try {
-            try {
-                $this->ejecutar($s);
-                $this->fail('Se esperaba 409');
-            } catch (ApiError $error) {
-                $this->assertSame(409, $error->status);
+        $cambioAplicado = false;
+        $s->antes['carrito.iniciar'] = function () use ($s, &$cambioAplicado): void {
+            if (!$cambioAplicado) {
+                $s->version = 4; // alguien agregó tras la lectura
+                $cambioAplicado = true;
             }
+        };
+        try {
+            $this->esperar503(fn () => $this->ejecutar($s));
             $pedido = Pedido::where('usuario_id', $s->usuario)->sole();
-            $this->assertSame('cancelado', $pedido->estado);
-            $this->assertSame('carrito_desactualizado', $pedido->paso);
+            $this->assertSame('pendiente', $pedido->estado);
+            $this->assertSame('por_iniciar_carrito', $pedido->paso);
+            $this->assertNull($pedido->pago_id);
+            $this->assertNull($pedido->guia);
             foreach (['inventario.reservar', 'pagos.procesar', 'envios.generar', 'carrito.finalizar'] as $efecto) {
                 $this->assertSame(0, $s->cuenta($efecto), $efecto);
             }
-            // Repetir la misma clave devuelve el mismo resultado sin nuevas llamadas.
-            $antes = count($s->llamadas);
-            try {
-                $this->ejecutar($s);
-            } catch (ApiError $error) {
-                $this->assertSame(409, $error->status);
-            }
-            $this->assertCount($antes, $s->llamadas);
+
+            $s->version = 3; // el conflicto desaparece y la misma clave puede reanudar la saga
+            $reintento = $this->ejecutar($s);
+            $this->assertSame($pedido->id, $reintento->id);
+            $this->assertSame('pagado', $reintento->estado);
         } finally {
             Pedido::where('usuario_id', $s->usuario)->delete();
         }
@@ -240,8 +240,18 @@ final class CompraTest extends TestCase
                 $this->fail('Se esperaba 409');
             } catch (ApiError $error) {
                 $this->assertSame(409, $error->status);
+                $this->assertSame(['stock' => ['stock_insuficiente']], $error->errors);
             }
             $this->assertSame('sin_stock', $pedido->fresh()->paso);
+            $s->sinStock = false; // Aun con existencias, el pedido rechazado es terminal.
+            try {
+                $this->ejecutar($s);
+                $this->fail('Se esperaba el 409 definitivo del mismo pedido');
+            } catch (ApiError $error) {
+                $this->assertSame(409, $error->status);
+            }
+            $this->assertSame('cancelado', Pedido::where('usuario_id', $s->usuario)->sole()->estado);
+            $this->assertNull($pedido->fresh()->pago_id);
             $this->assertSame(2, $s->cuenta('carrito.liberar'));
             $this->assertSame(1, $s->cuenta('inventario.reservar'));
             $this->assertSame(0, $s->cuenta('pagos.procesar'));
@@ -294,7 +304,8 @@ final class CompraTest extends TestCase
             $pedido = $pedido->fresh();
             $this->assertSame('terminado', $pedido->paso);
             $this->assertSame('cancelado', $pedido->estado);
-            $this->assertSame(2, $s->cuenta('inventario.liberar'));
+            $claveLiberar = $pedido->clave('liberar');
+            $this->assertSame([$claveLiberar, $claveLiberar], array_column($s->de('inventario.liberar'), 'idempotencia'));
             $this->assertSame(2, $s->cuenta('carrito.liberar'));
             $this->assertSame(1, $s->cuenta('pagos.procesar'));
             $this->assertSame(0, $pedido->intentos);

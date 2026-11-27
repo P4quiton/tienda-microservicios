@@ -118,3 +118,35 @@ func assertResponseStatus(t *testing.T, response *httptest.ResponseRecorder, exp
 		t.Fatalf("expected HTTP %d, got %d: %s", expected, response.Code, response.Body.String())
 	}
 }
+
+func TestJSONBodySizeLimitHTTP(t *testing.T) {
+	router := testInventoryRouter()
+	valid := `{"pedido_id":"invalid"}`
+	atLimit := valid + strings.Repeat(" ", maxBodyBytes-len(valid))
+	for _, tc := range []struct {
+		name, body  string
+		unknownSize bool
+		status      int
+	}{
+		{"límite exacto", atLimit, false, http.StatusUnprocessableEntity},
+		{"longitud declarada", atLimit + " ", false, http.StatusRequestEntityTooLarge},
+		{"longitud desconocida", atLimit + " ", true, http.StatusRequestEntityTooLarge},
+		{"longitud desconocida y JSON inválido", "!" + atLimit, true, http.StatusRequestEntityTooLarge},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/inventario/confirmar", strings.NewReader(tc.body))
+			if tc.unknownSize {
+				req.ContentLength = -1
+				req.TransferEncoding = []string{"chunked"}
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Service-Token", testServiceToken)
+			res := httptest.NewRecorder()
+			router.ServeHTTP(res, req)
+			assertResponseStatus(t, res, tc.status)
+			if tc.status == http.StatusRequestEntityTooLarge {
+				assertJSONError(t, res, "", "")
+			}
+		})
+	}
+}

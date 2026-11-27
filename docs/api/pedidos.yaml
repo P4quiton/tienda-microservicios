@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: API pedidos
-  version: 1.1.0
+  version: 1.2.0
   description: PHP / Laravel / PostgreSQL | Revisión de contratos checkout.
 servers:
 - url: http://localhost:8006
@@ -14,11 +14,19 @@ paths:
   /api/pedidos:
     post:
       summary: Crear pedido y coordinar compra
-      description: JWT cliente/admin; usuario desde sub. Persistir pedido y clave antes de efectos externos; snapshot
+      description: >
+        JWT cliente/admin; usuario desde sub. Persistir pedido y clave antes de efectos externos; snapshot
         versionado de Carrito, recalcular importes, reservar, pagar y finalizar. Un checkout activo por usuario.
-        201 pedido persistido con resultado definitivo incluso rechazo (cancelado); 503 si resultado incierto o
-        finalización pendiente, repetir misma clave para recuperar el mismo pedido. 409 si otro checkout activo
-        o carrito cambió antes de iniciar. Recuperación durable en PostgreSQL incluso sin nueva petición del cliente.
+        Tras el pago aprobado, finalizar el snapshot con POST /api/carrito/{usuario_id}/finalizar, no con
+        DELETE /api/carrito/{usuario_id}/vaciar: así se preservan las líneas agregadas durante el checkout.
+        409 con errors.stock[0] = stock_insuficiente cuando Inventario no tiene stock: el pedido queda persistido
+        como cancelado, sin cobro ni reserva (resultado definitivo). Solo ese 409 cancela por falta de stock; otro
+        409 de la reserva se trata como resultado incierto (503). 201 solo si el pedido queda pagado. 409 si la clave ya se usó con otros datos, si el carrito está vacío, si
+        el usuario tiene otra compra no terminal con otra clave o si hay una compra concurrente del mismo usuario.
+        503 si el resultado es incierto o la finalización está pendiente, y también si Carrito responde 409
+        (versión cambiada o checkout activo) al iniciar: el pedido queda pendiente y reintentable con la misma
+        clave, sin cobro ni reserva. Repetir misma clave para recuperar el mismo pedido. Recuperación durable en
+        PostgreSQL incluso sin nueva petición del cliente.
       operationId: pedidos_18
       security:
       - bearerAuth: []

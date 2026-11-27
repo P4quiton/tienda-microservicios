@@ -26,12 +26,19 @@ export class Shell {
   constructor() {
     const destroyRef = inject(DestroyRef);
     const sub = this.router.events.subscribe((e) => { if (e instanceof NavigationEnd) setTimeout(() => this.moverIndicador()); });
+    const alRedimensionar = () => this.moverIndicador();
     afterNextRender(() => {
       this.moverIndicador();
-      const ro = new ResizeObserver(() => this.moverIndicador());
-      const ul = this.tabbar()?.nativeElement;
-      if (ul) ro.observe(ul);
-      destroyRef.onDestroy(() => ro.disconnect());
+      window.addEventListener('resize', alRedimensionar);
+      destroyRef.onDestroy(() => window.removeEventListener('resize', alRedimensionar));
+      // ResizeObserver puede no estar disponible en entornos de prueba o navegadores antiguos.
+      // El listener resize mantiene el indicador alineado aunque ResizeObserver no exista.
+      if (typeof ResizeObserver !== 'undefined') {
+        const ro = new ResizeObserver(() => this.moverIndicador());
+        const ul = this.tabbar()?.nativeElement;
+        if (ul) ro.observe(ul);
+        destroyRef.onDestroy(() => ro.disconnect());
+      }
     });
     destroyRef.onDestroy(() => sub.unsubscribe());
     this.carrito.refrescar().catch(() => undefined);

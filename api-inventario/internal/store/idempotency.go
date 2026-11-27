@@ -23,7 +23,7 @@ func (p *Postgres) LookupIdempotency(ctx context.Context, key, identity, operati
 		return false, fmt.Errorf("consultar clave de idempotencia: %w", err)
 	}
 	if (storedIdentity != identity && storedIdentity != "admin:legacy") || storedOperation != operation || storedHash != requestHash {
-		return false, ErrConflict
+		return false, ErrIdempotencyConflict
 	}
 	if len(storedResult) == 0 || string(storedResult) == "{}" {
 		return false, ErrInProgress
@@ -59,7 +59,7 @@ func beginIdempotentOperation(ctx context.Context, tx pgx.Tx, key, identity, ope
 		return nil, false, fmt.Errorf("leer operación idempotente existente: %w", err)
 	}
 	if storedIdentity != identity || storedOperation != operation || storedHash != requestHash {
-		return nil, false, ErrConflict
+		return nil, false, ErrIdempotencyConflict
 	}
 	if len(result) == 0 || string(result) == "{}" {
 		return nil, false, ErrInProgress
@@ -67,6 +67,10 @@ func beginIdempotentOperation(ctx context.Context, tx pgx.Tx, key, identity, ope
 	return json.RawMessage(result), true, nil
 }
 
+// saveIdempotentResult guarda el resultado de la operación en la fila de la
+// clave (creada antes por beginIdempotentOperation) dentro de la MISMA
+// transacción que el efecto. También se usa para el rechazo 409
+// stock_insuficiente, que se persiste por clave tras un ROLLBACK TO SAVEPOINT.
 func saveIdempotentResult(ctx context.Context, tx pgx.Tx, key string, result any) error {
 	serialized, err := json.Marshal(result)
 	if err != nil {

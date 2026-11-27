@@ -1,4 +1,4 @@
-"""Stubs minimos de Productos e Inventario (servicios aun inexistentes) para la prueba E2E.
+"""Stubs minimos de Productos e Inventario para la prueba E2E.
 
 Respetan docs/api/productos.yaml y docs/api/inventario.yaml solo en lo que consumen
 Carrito y Pedidos. Estado en memoria; se arrancan nuevos en cada corrida.
@@ -18,6 +18,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 UUID4 = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
 PRECIO = re.compile(r"^\d{1,10}\.\d{2}$")
 LOCK = threading.RLock()
+MAX_INT64 = (1 << 63) - 1
+MAX_BODY_BYTES = 262144
 
 
 def ok(data, status=200):
@@ -43,8 +45,7 @@ class Base(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
-    def _body(self):
-        n = int(self.headers.get("Content-Length") or 0)
+    def _body(self, n):
         raw = self.rfile.read(n) if n else b""
         try:
             return json.loads(raw or b"{}")
@@ -57,7 +58,18 @@ class Base(BaseHTTPRequestHandler):
             return self._send(200, {"status": "ok", "service": self.servicio})
         if path == "/ready":
             return self._send(200, {"status": "ok", "service": self.servicio})
-        body = self._body() if method in ("POST", "PUT", "PATCH") else None
+        body = None
+        if method in ("POST", "PUT", "PATCH"):
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return self._send(400, err(400, "El cuerpo debe ser JSON válido y respetar el contrato.")[1])
+            if length < 0:
+                return self._send(400, err(400, "El cuerpo debe ser JSON válido y respetar el contrato.")[1])
+            if length > MAX_BODY_BYTES:
+                self.close_connection = True
+                return self._send(413, err(413, "Cuerpo demasiado grande.")[1])
+            body = self._body(length)
         with LOCK:
             status, out = self.handle_api(method, path, body)
         self._send(status, out)
@@ -93,7 +105,7 @@ class Inventario(Base):
     servicio = "api-inventario"
     stock = {}      # producto_id -> {"fisico": int, "reservado": int}
     reservas = {}   # pedido_id -> {"items": [...], "estado": str}
-    idem = {}       # (operacion, clave) -> (huella, status, body)
+    idem = {}       # clave -> (huella, status, body)
     llamadas = []   # bitacora (operacion, pedido_id, clave) para las aserciones
 
     @classmethod
@@ -102,10 +114,12 @@ class Inventario(Base):
         return max(0, s["fisico"] - s["reservado"]) if s else 0
 
     def _auth(self):
-        esperado = os.environ["SERVICE_TOKEN_PEDIDOS_INVENTARIO"]
+        esperado = os.environ.get("SERVICE_TOKEN_PEDIDOS_INVENTARIO")
+        if not esperado:
+            return err(503, "La autenticación entre servicios no está configurada.")
         recibido = self.headers.get("X-Service-Token")
         if not recibido or recibido != esperado:
-            return err(401, "Credencial interna invalida")
+            return err(401, "Credencial de servicio inválida.")
         return None
 
     def handle_api(self, method, path, body):
@@ -123,70 +137,92 @@ class Inventario(Base):
             if fallo:
                 return fallo
             clave = self.headers.get("Idempotency-Key", "")
-            if not UUID4.match(clave):
+            if not UUID4.fullmatch(clave):
                 return err(422, "Idempotency-Key UUID v4 obligatoria")
-            return self._operar(path.rsplit("/", 1)[1], clave, body)
+            return self._operar(path.rsplit("/", 1)[1], clave.lower(), body)
         return err(404, "No encontrado")
 
     def _operar(self, op, clave, body):
-        if not isinstance(body, dict) or not UUID4.match(str(body.get("pedido_id", ""))):
-            return err(422, "pedido_id invalido")
+        if not isinstance(body, dict):
+            return err(400, "El cuerpo debe ser JSON válido y respetar el contrato.")
         extra = set(body) - ({"pedido_id", "items"} if op == "reservar" else {"pedido_id"})
         if extra:
-            return err(422, "campos no declarados")
-        pedido = body["pedido_id"]
+            return err(400, "El cuerpo debe ser JSON válido y respetar el contrato.")
+        if not UUID4.fullmatch(str(body.get("pedido_id", ""))):
+            return err(422, "pedido_id invalido")
+        pedido = body["pedido_id"].lower()
         items = []
+        items_solicitados = []
         if op == "reservar":
             raw = body.get("items")
-            if not isinstance(raw, list) or not raw:
+            if raw is None or raw == []:
                 return err(422, "items obligatorio")
+            if not isinstance(raw, list):
+                return err(400, "El cuerpo debe ser JSON válido y respetar el contrato.")
             agg = {}
             for it in raw:
-                if (not isinstance(it, dict) or set(it) != {"producto_id", "cantidad"}
-                        or not UUID4.match(str(it["producto_id"]))
-                        or not isinstance(it["cantidad"], int) or isinstance(it["cantidad"], bool) or it["cantidad"] < 1):
+                if not isinstance(it, dict) or set(it) - {"producto_id", "cantidad"}:
+                    return err(400, "El cuerpo debe ser JSON válido y respetar el contrato.")
+                cantidad = it.get("cantidad", 0)
+                if type(cantidad) is not int or cantidad > MAX_INT64 or cantidad < -MAX_INT64 - 1:
+                    return err(400, "El cuerpo debe ser JSON válido y respetar el contrato.")
+                if not UUID4.fullmatch(str(it.get("producto_id", ""))) or cantidad < 1:
                     return err(422, "item invalido")
-                agg[it["producto_id"]] = agg.get(it["producto_id"], 0) + it["cantidad"]
+                producto = it["producto_id"].lower()
+                items_solicitados.append({"producto_id": producto, "cantidad": cantidad})
+                agg[producto] = agg.get(producto, 0) + cantidad
+                if agg[producto] > MAX_INT64:
+                    return err(422, "La cantidad acumulada está fuera de rango.")
             items = [{"producto_id": k, "cantidad": v} for k, v in sorted(agg.items())]
-        huella = hashlib.sha256(json.dumps([op, pedido, items], sort_keys=True).encode()).hexdigest()
+        # Inventario distingue el cuerpo original de la lista agregada de la reserva.
+        huella = hashlib.sha256(json.dumps([op, pedido, items_solicitados], sort_keys=True).encode()).hexdigest()
         self.llamadas.append([op, pedido, clave])
-        previo = self.idem.get((op, clave))
+        previo = self.idem.get(clave)
         if previo:
-            return (previo[1], previo[2]) if previo[0] == huella else err(409, "Clave usada con otra solicitud")
+            if previo[0] == huella:
+                return previo[1], previo[2]
+            return err(409, "La clave de idempotencia ya se usó con otros datos.",
+                       {"idempotency_key": ["conflicto_idempotencia"]})
         res = self._efecto(op, pedido, items)
-        self.idem[(op, clave)] = (huella, res[0], res[1])
+        status, respuesta = res
+        if status == 200 or (status == 409 and respuesta["errors"].get("stock") == ["stock_insuficiente"]):
+            self.idem[clave] = (huella, status, respuesta)
         return res
 
     def _efecto(self, op, pedido, items):
         r = self.reservas.get(pedido)
         if op == "reservar":
             if r:
-                return ok(self._vista(pedido)) if r["items"] == items else err(409, "Reserva existente con otro contenido")
+                if r["items"] != items:
+                    return err(409, "La operación es incompatible con el estado actual del inventario.")
+                return self._reserva_exitosa(pedido, op)
             for it in items:
                 if self.disponibles(it["producto_id"]) < it["cantidad"]:
-                    return err(409, "Stock insuficiente", {"stock": ["stock_insuficiente"]})
+                    return err(409, "Inventario insuficiente.", {"stock": ["stock_insuficiente"]})
             for it in items:
                 self.stock[it["producto_id"]]["reservado"] += it["cantidad"]
             self.reservas[pedido] = {"items": items, "estado": "reservada"}
-            return ok(self._vista(pedido))
+            return self._reserva_exitosa(pedido, op)
         if not r:
-            return err(404, "Reserva inexistente")
+            return err(404, "Recurso no encontrado.")
         destino = "confirmada" if op == "confirmar" else "liberada"
         if r["estado"] == destino:
-            return ok(self._vista(pedido))
+            return self._reserva_exitosa(pedido, op)
         if r["estado"] != "reservada":
-            return err(409, "Transicion incompatible")
+            return err(409, "La operación es incompatible con el estado actual del inventario.")
         for it in r["items"]:
             s = self.stock[it["producto_id"]]
             s["reservado"] -= it["cantidad"]
             if destino == "confirmada":
                 s["fisico"] -= it["cantidad"]
         r["estado"] = destino
-        return ok(self._vista(pedido))
+        return self._reserva_exitosa(pedido, op)
 
-    def _vista(self, pedido):
+    def _reserva_exitosa(self, pedido, op):
         r = self.reservas[pedido]
-        return {"pedido_id": pedido, "items": r["items"], "estado": r["estado"]}
+        mensaje = "Existencias reservadas correctamente." if op == "reservar" else "Estado de reserva actualizado."
+        return 200, {"success": True, "message": mensaje,
+                     "data": {"pedido_id": pedido, "items": r["items"], "estado": r["estado"]}}
 
 
 if __name__ == "__main__":
