@@ -39,6 +39,8 @@ final class ServiciosFalsos
 
     /** Si no es null, GET /api/pagos/pedido/{id} devuelve este estado; si es null, 404. */
     public ?string $pagoConsultable = null;
+    public ?string $pagoIdConsultable = null;
+    public string $metodoConsultable = 'tarjeta_simulada';
 
     public ?string $archivo = null;
 
@@ -147,8 +149,8 @@ final class ServiciosFalsos
             'pagos.procesar' => $id + ['id' => $this->pagoId, 'monto' => $cuerpo['monto'] ?? null,
                 'metodo_pago' => $cuerpo['metodo_pago'] ?? null, 'estado' => $this->pago, 'creado_en' => now()->toISOString()],
             'pagos.consultar' => $this->pagoConsultable === null ? 404 : [
-                'id' => $this->pagoId, 'pedido_id' => basename(parse_url($peticion->url(), PHP_URL_PATH)),
-                'monto' => '9.00', 'metodo_pago' => 'tarjeta_simulada', 'estado' => $this->pagoConsultable,
+                'id' => $this->pagoIdConsultable ?? $this->pagoId, 'pedido_id' => basename(parse_url($peticion->url(), PHP_URL_PATH)),
+                'monto' => '9.00', 'metodo_pago' => $this->metodoConsultable, 'estado' => $this->pagoConsultable,
                 'creado_en' => now()->toISOString(),
             ],
             'envios.generar' => $id + ['id' => (string) Str::uuid(), 'guia' => 'GUIA-FICTICIA', 'estado' => 'preparando'],

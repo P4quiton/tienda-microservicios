@@ -360,6 +360,15 @@ final class CompraTest extends TestCase
             $this->assertSame('por_pagar', $pedido->paso);
             $this->assertNull($pedido->pago_id);
 
+            // Un comprobante con otro método de pago no se persiste ni avanza el pedido.
+            $s->pagoIdConsultable = (string) Str::uuid();
+            $s->metodoConsultable = 'transferencia_simulada';
+            $this->esperar503(fn () => $this->ejecutar($s));
+            $this->assertNull($pedido->fresh()->pago_id);
+            $this->assertSame('por_pagar', $pedido->fresh()->paso);
+            $s->metodoConsultable = 'tarjeta_simulada';
+            $s->pagoIdConsultable = null;
+
             $pagoRegistrado = (string) Str::uuid();
             $pedido->update(['pago_id' => $pagoRegistrado]);
             $s->pagoId = (string) Str::uuid();

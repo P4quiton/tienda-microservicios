@@ -357,6 +357,7 @@ final class Compra
         $id = $pago['id'] ?? null;
         if (!Str::isUuid($id)
             || ($pago['pedido_id'] ?? null) !== $pedido->id || ($pago['monto'] ?? null) !== $pedido->total
+            || ($pago['metodo_pago'] ?? null) !== $pedido->metodo_pago
             || !in_array($pago['estado'] ?? null, ['aprobado', 'rechazado'], true)) {
             throw new ApiError(503, 'Resultado de pago incierto');
         }
