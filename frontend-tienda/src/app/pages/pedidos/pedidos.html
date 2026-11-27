@@ -1,0 +1,75 @@
+<header class="cabeza">
+  <h1>Mis pedidos</h1>
+  <p class="subtitulo">Consulta el estado de tus compras.</p>
+</header>
+
+@switch (estado().estado) {
+  @case ('cargando') { <app-estado-vista tipo="cargando" titulo="Cargando tus pedidos…" /> }
+  @case ('error') { <app-estado-vista tipo="error" titulo="No pudimos cargar tus pedidos" [mensaje]="$any(estado()).mensaje" (reintentar)="cargar()" /> }
+  @default {
+    <ul class="lista">
+      @for (p of lista(); track p.id) {
+        @let e = estados[p.estado];
+        <li class="pedido tarjeta">
+          <div class="fila">
+            <div class="ident">
+              <h2>Pedido {{ folio(p.id) }}</h2>
+              <time class="muted" [attr.datetime]="p.creado_en">{{ p.creado_en | date: "d 'de' MMMM 'de' y" : undefined : 'es-MX' }}</time>
+              <span class="chip {{ e.clase }}">{{ e.texto }}</span>
+            </div>
+            <div class="miniaturas" aria-hidden="true">
+              @for (i of p.items.slice(0, 3); track i.producto_id) {
+                @if (productos()[i.producto_id]; as prod) { <img [src]="prod.imagen_url" alt="" width="48" height="36" /> }
+              }
+            </div>
+            <div class="total"><span class="muted">Total</span><strong>{{ p.total | mxn }}</strong></div>
+
+            <div class="seguimiento">
+              <span class="muted rotulo">Estado del pedido</span>
+              @if (p.estado === 'cancelado') {
+                <p class="cancelado">Pedido cancelado; no se realizó el envío.</p>
+              } @else {
+                <ol class="linea-tiempo" [attr.aria-label]="'Progreso: ' + e.texto">
+                  @for (et of etapas; track et; let i = $index) {
+                    <li [class.hecho]="progreso[p.estado] > i"><span class="punto" aria-hidden="true"></span>{{ et }}</li>
+                  }
+                </ol>
+              }
+            </div>
+
+            <div class="guia">
+              <span class="muted rotulo">Guía de rastreo</span>
+              <span class="pendiente">Pendiente</span>
+              <button type="button" class="btn btn-secundario" disabled aria-describedby="nota-guia">Rastrear envío</button>
+            </div>
+
+            <button type="button" class="expandir" [attr.aria-expanded]="abierto() === p.id" [attr.aria-controls]="'det-' + p.id"
+              [attr.aria-label]="'Ver detalle del pedido ' + folio(p.id)" (click)="alternar(p.id)">
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+            </button>
+          </div>
+
+          @if (abierto() === p.id) {
+            <div class="detalle" [id]="'det-' + p.id">
+              <table>
+                <caption class="sr-only">Artículos del pedido</caption>
+                <thead><tr><th scope="col">Producto</th><th scope="col">Cantidad</th><th scope="col">Precio unitario</th></tr></thead>
+                <tbody>
+                  @for (i of p.items; track i.producto_id) {
+                    <tr><td>{{ productos()[i.producto_id]?.nombre ?? 'Producto' }}</td><td>{{ i.cantidad }}</td><td>{{ i.precio_unitario | mxn }}</td></tr>
+                  }
+                </tbody>
+              </table>
+              <p class="muted">Envío: {{ p.costo_envio | mxn }} · Entrega en {{ p.direccion.calle }}, {{ p.direccion.ciudad }}, {{ p.direccion.estado }} C.P. {{ p.direccion.codigo_postal }}</p>
+            </div>
+          }
+        </li>
+      } @empty {
+        <app-estado-vista titulo="Aún no tienes pedidos" mensaje="Cuando realices una compra, aparecerá aquí con su estado.">
+          <a routerLink="/catalogo" class="btn btn-primario">Explorar catálogo</a>
+        </app-estado-vista>
+      }
+    </ul>
+    <p id="nota-guia" class="muted nota">La guía y el rastreo aún no están disponibles: la consulta de pedidos no devuelve el número de guía.</p>
+  }
+}

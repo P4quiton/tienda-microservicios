@@ -1,0 +1,41 @@
+<section class="acceso">
+  <aside class="marca-panel" aria-hidden="true">
+    <img src="brand/nebula-emblema.svg" alt="" width="96" height="96" />
+    <p class="lema">Tecnología con estilo,<br />a un clic de distancia.</p>
+    <ul><li>Envíos cotizados al instante</li><li>Pagos de demostración seguros</li><li>Sigue tus pedidos en un solo lugar</li></ul>
+  </aside>
+  <div class="panel glass">
+    <img src="brand/nebula-logo.png" alt="Nébula" width="150" height="50" class="logo" />
+    <h1>{{ modo() === 'entrar' ? 'Bienvenido de nuevo' : 'Crea tu cuenta' }}</h1>
+    <p class="subtitulo">{{ modo() === 'entrar' ? 'Inicia sesión para comprar y ver tus pedidos.' : 'Regístrate para comprar en Nébula.' }}</p>
+    @if (volver()) { <p class="chip">Inicia sesión para continuar</p> }
+
+    <div class="pestanas" role="tablist" aria-label="Tipo de acceso">
+      <button type="button" role="tab" [attr.aria-selected]="modo() === 'entrar'" [class.activa]="modo() === 'entrar'" (click)="cambiar('entrar')">Iniciar sesión</button>
+      <button type="button" role="tab" [attr.aria-selected]="modo() === 'registro'" [class.activa]="modo() === 'registro'" (click)="cambiar('registro')">Registrarme</button>
+    </div>
+
+    <form (submit)="enviar($event)" novalidate class="formulario">
+      @if (avisoRegistro()) { <p class="chip ok" role="status">{{ avisoRegistro() }}</p> }
+      @if (modo() === 'registro') {
+        <label class="campo">Nombre
+          <input class="input" name="nombre" autocomplete="name" [(ngModel)]="form.nombre" [attr.aria-invalid]="!!errores().nombre" aria-describedby="e-nombre" />
+          <span id="e-nombre" class="error-campo">{{ errores().nombre }}</span>
+        </label>
+      }
+      <label class="campo">Correo electrónico
+        <input class="input" type="email" name="correo" autocomplete="email" [(ngModel)]="form.correo" [attr.aria-invalid]="!!errores().correo" aria-describedby="e-correo" />
+        <span id="e-correo" class="error-campo">{{ errores().correo }}</span>
+      </label>
+      <label class="campo">Contraseña
+        <input class="input" type="password" name="contrasena" [attr.autocomplete]="modo() === 'entrar' ? 'current-password' : 'new-password'"
+          [(ngModel)]="form.contrasena" [attr.aria-invalid]="!!errores().contrasena" aria-describedby="e-contrasena" />
+        <span id="e-contrasena" class="error-campo">{{ errores().contrasena }}</span>
+      </label>
+      @if (errorGeneral()) { <p class="alerta" role="alert">{{ errorGeneral() }}</p> }
+      <button type="submit" class="btn btn-primario btn-grande" [disabled]="enviando()">
+        {{ enviando() ? 'Procesando…' : modo() === 'entrar' ? 'Iniciar sesión' : 'Crear cuenta' }}
+      </button>
+    </form>
+  </div>
+</section>

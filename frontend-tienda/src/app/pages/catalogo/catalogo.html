@@ -1,0 +1,61 @@
+<section class="hero glass">
+  <div class="hero-texto">
+    <span class="sobretitulo">Colección Nébula</span>
+    <h1>Encuentra algo extraordinario</h1>
+    <p class="subtitulo">Tecnología y accesorios de estilo de vida para tu día a día.</p>
+  </div>
+  <img class="hero-emblema" src="brand/nebula-emblema.svg" alt="" width="150" height="150" />
+</section>
+
+<div class="filtros glass">
+  <span class="titulo-filtro" id="lbl-categorias">Categorías:</span>
+  <div class="chips" role="group" aria-labelledby="lbl-categorias">
+    <button type="button" class="filtro" [class.activo]="!categoria()" [attr.aria-pressed]="!categoria()" (click)="filtrar(null)">Todas</button>
+    @for (c of categorias(); track c) {
+      <button type="button" class="filtro" [class.activo]="categoria() === c" [attr.aria-pressed]="categoria() === c" (click)="filtrar(c)">{{ c }}</button>
+    }
+    @if (categoria() && !categorias().includes(categoria()!)) {
+      <button type="button" class="filtro activo" aria-pressed="true">{{ categoria() }}</button>
+    }
+  </div>
+  <label class="orden">
+    <span class="sr-only">Ordenar por</span>
+    <select class="input" [value]="orden()" (change)="orden.set($any($event.target).value)">
+      <option value="recomendados">Recomendados</option>
+      <option value="precio-asc">Precio: menor a mayor</option>
+      <option value="precio-desc">Precio: mayor a menor</option>
+      <option value="calificacion">Mejor calificados</option>
+    </select>
+  </label>
+</div>
+
+@if (q()) {
+  <p class="muted resultado">Resultados para «{{ q() }}» · <button type="button" class="enlace" (click)="limpiar()">Limpiar búsqueda</button></p>
+}
+
+<p class="sr-only" aria-live="polite">{{ aviso() }}</p>
+
+@switch (estado().estado) {
+  @case ('cargando') {
+    <div class="grid" aria-hidden="true">
+      @for (i of [1, 2, 3, 4]; track i) { <div class="esqueleto tarjeta"></div> }
+    </div>
+    <span class="sr-only" role="status">Cargando productos…</span>
+  }
+  @case ('error') {
+    <app-estado-vista tipo="error" titulo="No pudimos cargar el catálogo" [mensaje]="$any(estado()).mensaje" (reintentar)="cargar()" />
+  }
+  @default {
+    @if (ordenados().length) {
+      <div class="grid">
+        @for (d of ordenados(); track d.producto.id) {
+          <app-producto-card [dato]="d" [agregando]="agregando() === d.producto.id" (agregar)="agregar($event)" />
+        }
+      </div>
+    } @else {
+      <app-estado-vista titulo="Sin productos" mensaje="No encontramos productos con esos filtros.">
+        <button type="button" class="btn btn-secundario" (click)="limpiar()">Ver todo el catálogo</button>
+      </app-estado-vista>
+    }
+  }
+}

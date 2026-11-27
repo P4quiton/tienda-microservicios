@@ -1,0 +1,22 @@
+.hero { display: flex; align-items: center; justify-content: space-between; gap: 2rem; padding: 2.2rem 2.4rem; margin-bottom: 1.25rem; overflow: hidden;
+  background: linear-gradient(120deg, rgba(255,255,255,.78), rgba(220,235,255,.5) 60%, rgba(190,230,250,.45)); }
+.hero > * { position: relative; }
+.sobretitulo { display: inline-block; font-size: .78rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--azul); margin-bottom: .5rem; }
+.hero h1 { font-size: clamp(1.9rem, 3.4vw, 2.7rem); }
+.hero-emblema { width: 150px; height: 150px; opacity: .9; filter: drop-shadow(0 18px 30px rgba(11,92,255,.35)); flex: none; }
+@media (max-width: 640px) { .hero { padding: 1.5rem; } .hero-emblema { display: none; } }
+.filtros > * { position: relative; }
+.filtros { position: sticky; top: 96px; z-index: 5; display: flex; align-items: center; gap: 1rem; padding: .7rem .9rem .7rem 1.2rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+.titulo-filtro { font-weight: 700; color: var(--noche); }
+.chips { display: flex; gap: .5rem; flex-wrap: wrap; }
+.filtro { font: inherit; font-weight: 600; font-size: .9rem; padding: .45rem 1rem; border-radius: 999px; border: 1px solid var(--borde); background: rgba(255,255,255,.7); color: var(--texto); cursor: pointer; transition: background .2s, border-color .2s, color .2s; }
+.filtro:hover { border-color: rgba(11,92,255,.4); }
+.filtro.activo { background: var(--grad-azul); border-color: transparent; color: #fff; box-shadow: 0 8px 16px -8px rgba(11,92,255,.6); }
+.orden { margin-left: auto; }
+.orden select { border-radius: 999px; padding-block: .45rem; }
+.resultado { margin: -.5rem 0 1rem; }
+.enlace { background: none; border: 0; padding: 0; font: inherit; color: var(--azul); text-decoration: underline; cursor: pointer; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1.5rem; }
+.esqueleto { height: 420px; background: linear-gradient(100deg, #fff 30%, #eef3fb 50%, #fff 70%) 0 0 / 200% 100%; animation: brillo 1.2s linear infinite; }
+@keyframes brillo { to { background-position: -200% 0; } }
+@media (max-width: 640px) { .orden { margin-left: 0; width: 100%; } }

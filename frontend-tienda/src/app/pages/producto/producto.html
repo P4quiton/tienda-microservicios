@@ -1,0 +1,106 @@
+@switch (producto().estado) {
+  @case ('cargando') { <app-estado-vista tipo="cargando" titulo="Cargando producto…" /> }
+  @case ('error') {
+    <app-estado-vista tipo="error" titulo="No pudimos cargar el producto" [mensaje]="$any(producto()).mensaje" (reintentar)="cargar()" />
+    <p class="volver"><a routerLink="/catalogo">← Volver al catálogo</a></p>
+  }
+  @default {
+    @let p = $any(producto()).datos;
+    <nav aria-label="Ruta de navegación" class="migas muted">
+      <a routerLink="/catalogo">Catálogo</a> <span aria-hidden="true">›</span>
+      <a routerLink="/catalogo" [queryParams]="{ categoria: p.categoria }">{{ p.categoria }}</a> <span aria-hidden="true">›</span>
+      <span aria-current="page">{{ p.nombre }}</span>
+    </nav>
+
+    <section class="detalle">
+      <div class="galeria tarjeta"><img [src]="p.imagen_url || '/mock/electronica.svg'" (error)="usarImagenRespaldo($event.target, p.categoria)" [alt]="p.nombre" width="400" height="300" /></div>
+
+      <div class="info glass">
+        <span class="etiqueta">{{ p.categoria }}</span>
+        <h1>{{ p.nombre }}</h1>
+        @if (resenas().estado === 'listo') {
+          @let r = $any(resenas()).datos;
+          <p class="calif muted"><app-estrellas [valor]="r.promedio" /> @if (r.promedio != null) { <strong>{{ r.promedio }}</strong> ({{ r.total }} reseñas) } @else { Sin reseñas aún }</p>
+        }
+        <p class="precio">{{ p.precio | mxn }}</p>
+        <p class="descripcion">{{ p.descripcion }}</p>
+
+        <p class="stock">
+          @switch (true) {
+            @case (disponibles() === null) { <span class="chip">Consultando disponibilidad…</span> }
+            @case (disponibles() === 0) { <span class="chip err">Agotado</span> }
+            @case (disponibles()! <= 5) { <span class="chip warn">Últimas {{ disponibles() }} unidades</span> }
+            @default { <span class="chip ok">Disponible · {{ disponibles() }} unidades</span> }
+          }
+        </p>
+
+        <div class="compra">
+          <div class="cantidad" role="group" aria-label="Cantidad">
+            <button type="button" aria-label="Disminuir cantidad" (click)="cambiarCantidad(-1)" [disabled]="cantidad() <= 1">−</button>
+            <output aria-live="polite">{{ cantidad() }}</output>
+            <button type="button" aria-label="Aumentar cantidad" (click)="cambiarCantidad(1)" [disabled]="cantidad() >= (disponibles() ?? 1)">+</button>
+          </div>
+          <button type="button" class="btn btn-primario agregar" [disabled]="!disponibles() || agregando()" (click)="agregar()">
+            {{ agregando() ? 'Agregando…' : 'Agregar al carrito' }}
+          </button>
+        </div>
+        @if (aviso()) { <p class="aviso" role="status">{{ aviso() }} <a routerLink="/checkout">Ir al carrito</a></p> }
+      </div>
+    </section>
+
+    <section class="resenas tarjeta" aria-labelledby="titulo-resenas">
+      <h2 id="titulo-resenas">Reseñas de clientes</h2>
+      @switch (resenas().estado) {
+        @case ('cargando') { <app-estado-vista tipo="cargando" titulo="Cargando reseñas…" /> }
+        @case ('error') { <app-estado-vista tipo="error" titulo="No pudimos cargar las reseñas" [mensaje]="$any(resenas()).mensaje" (reintentar)="cargarResenas()" /> }
+        @default {
+          @let r = $any(resenas()).datos;
+          <div class="resenas-grid">
+            <div class="resumen">
+              <p class="promedio">{{ r.promedio ?? '—' }}</p>
+              <app-estrellas [valor]="r.promedio" [tam]="22" />
+              <p class="muted">({{ r.total }} reseñas)</p>
+            </div>
+            <div>
+              @for (item of r.items; track item.id) {
+                <article class="resena">
+                  <div class="avatar" aria-hidden="true">{{ $index + 1 }}</div>
+                  <div>
+                    <p class="cabecera"><strong>Cliente verificado</strong> <app-estrellas [valor]="item.calificacion" [tam]="13" /> <time class="muted" [attr.datetime]="item.creado_en">{{ item.creado_en | date: 'd MMM y' : undefined : 'es-MX' }}</time></p>
+                    <p class="comentario">{{ item.comentario }}</p>
+                  </div>
+                </article>
+              } @empty {
+                <p class="muted vacio">Este producto aún no tiene reseñas. ¡Sé el primero en opinar!</p>
+              }
+            </div>
+          </div>
+        }
+      }
+
+      @if (!sesion.usuario()) {
+        <p class="invitar muted">¿Compraste este producto? <a routerLink="/acceso" [queryParams]="{ volver: '/producto/' + id() }">Inicia sesión</a> para escribir una reseña.</p>
+      } @else {
+      <form class="formulario" (submit)="enviarResena($event)" novalidate>
+        <h3>Escribe una reseña</h3>
+        <fieldset class="selector">
+          <legend class="campo">Calificación</legend>
+          @for (n of [1, 2, 3, 4, 5]; track n) {
+            <label class="estrella" [class.on]="n <= calificacion()">
+              <input type="radio" name="calificacion" class="sr-only" [value]="n" [checked]="calificacion() === n" (change)="calificacion.set(n)" />
+              <span aria-hidden="true">★</span><span class="sr-only">{{ n }} estrellas</span>
+            </label>
+          }
+        </fieldset>
+        <label class="campo">Comentario
+          <textarea class="input" rows="3" maxlength="500" [ngModel]="comentario()" (ngModelChange)="comentario.set($event)" name="comentario"
+            placeholder="¿Qué te pareció el producto?" [attr.aria-invalid]="!!errorResena()" aria-describedby="error-resena"></textarea>
+        </label>
+        <p id="error-resena" class="error-campo" role="alert">{{ errorResena() }}</p>
+        @if (resenaEnviada()) { <p class="chip ok" role="status">¡Gracias! Tu reseña fue publicada.</p> }
+        <button type="submit" class="btn btn-primario" [disabled]="enviando()">{{ enviando() ? 'Enviando…' : 'Publicar reseña' }}</button>
+      </form>
+      }
+    </section>
+  }
+}
