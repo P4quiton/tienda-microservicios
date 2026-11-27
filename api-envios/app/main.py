@@ -33,7 +33,10 @@ def create_app(
     cliente_pedidos = pedidos or PedidosClient(settings)
     notificador = Notificador(pool, cliente_pedidos, settings.notificacion_intervalo, esquema_listo)
 
-    despachador = Despachador(pool, settings.despacho_segundos, settings.despacho_intervalo, esquema_listo)
+    despachador = Despachador(
+        pool, settings.despacho_segundos, settings.despacho_intervalo, esquema_listo,
+        entrega_segundos=settings.entrega_segundos,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):

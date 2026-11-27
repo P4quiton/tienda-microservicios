@@ -108,3 +108,21 @@ Cambios: `app/despacho.py` (Despachador), `EnviosRepo.despachar_vencidos` (+ hel
   Content-Length mentiroso con servidor real (uvicorn/h11 ya acota el cuerpo al Content-Length declarado, no se probó); comportamiento tras
   proxy (IP del socket); carga/rendimiento del middleware; ejecución con uvicorn real y Pedidos real; build Docker (prohibido).
   El límite en memoria no se comparte entre réplicas.
+
+## Actualizacion: despacho automatico y entrega automatica
+
+Las notas previas sobre la «decisión pendiente» del disparador quedaron superadas por el despacho periódico de
+`app/despacho.py`. El despacho fija la fecha de PostgreSQL junto con el cambio a `en_transito` y el registro del outbox
+en una sola transacción. Si ya existe una fecha de despacho, la conserva. La migración 003 inicia el plazo de las guías
+en tránsito sin fecha al momento de migrar.
+
+El mismo hilo entrega las guías vencidas según `ENVIOS_ENTREGA_SEGUNDOS` (entero positivo, 60 por defecto).
+La entrega actualiza el estado que devuelve rastreo. El outbox de despacho sigue siendo el único aviso a Pedidos,
+cuyo estado permanece `enviado`.
+
+- **Verificado.** PostgreSQL 17.12 en un contenedor efímero con el rol `usr_envios` sin `CREATEDB`.
+  Antes, 105 pruebas aprobadas. Después, 123 aprobadas. Ambas ejecuciones emitieron la misma advertencia de
+  deprecación de Starlette TestClient. Se comprobaron la migración concurrente y repetida, el plazo, la concurrencia,
+  el reinicio de la app, la recuperación del hilo tras un fallo, la atomicidad del despacho, el outbox y el rastreo HTTP.
+  El YAML parsea y coincide con el JSON servido. Solo cambiaron las descripciones de generar y rastrear.
+- **NO VERIFICADO.** Despliegue con réplicas en procesos separados, Pedidos y Angular reales, y build de la imagen.

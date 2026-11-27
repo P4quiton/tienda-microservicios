@@ -201,7 +201,7 @@
     "/api/envios/generar": {
       "post": {
         "summary": "Generar guía",
-        "description": "Identidad interna autorizada. Solo Pedidos; una guía por pedido pagado; repetir devuelve la misma guía. Persistir resultado y clave idempotente junto al efecto, con unicidad por pedido_id. Misma clave y payload devuelve resultado original; payload incompatible 409 incluso con otra clave. Nunca repetir el efecto tras timeout. Estado inicial preparando; al pasar realmente a en_transito, notificar PATCH de Pedidos con clave estable y reintentar notificación pendiente de forma durable.",
+        "description": "Identidad interna autorizada. Solo Pedidos; una guía por pedido pagado; repetir devuelve la misma guía. Persistir resultado y clave idempotente junto al efecto, con unicidad por pedido_id. Misma clave y payload devuelve resultado original; payload incompatible 409 incluso con otra clave. Nunca repetir el efecto tras timeout. La guía comienza en preparando y pasa automáticamente a en_transito tras ENVIOS_DESPACHO_SEGUNDOS desde su generación. Al despachar se encola el PATCH a Pedidos con clave estable y reintentos durables. La guía pasa automáticamente de en_transito a entregado tras ENVIOS_ENTREGA_SEGUNDOS desde el despacho.",
         "operationId": "envios_8",
         "security": [
           {
@@ -420,7 +420,7 @@
     "/api/envios/rastreo/{guia}": {
       "get": {
         "summary": "Rastrear envío",
-        "description": "Titular/admin o identidad interna autorizada. Validar titular consultando Pedidos o mediante identidad interna autorizada.",
+        "description": "Titular/admin o identidad interna autorizada. Validar titular consultando Pedidos o mediante identidad interna autorizada. Devuelve el estado actual de la guía. El paso de preparando a en_transito ocurre automáticamente tras ENVIOS_DESPACHO_SEGUNDOS desde la generación de la guía, y el paso de en_transito a entregado tras ENVIOS_ENTREGA_SEGUNDOS desde el despacho.",
         "operationId": "envios_9",
         "security": [
           {

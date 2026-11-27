@@ -116,7 +116,7 @@ class EnviosRepo:
         with self._pool.connection() as conn:
             cur = conn.cursor(row_factory=dict_row)
             envio = cur.execute(
-                f"UPDATE envios SET estado = 'en_transito', despachado_en = now() "
+                f"UPDATE envios SET estado = 'en_transito', despachado_en = COALESCE(despachado_en, now()) "
                 f"WHERE pedido_id = %s AND estado = 'preparando' RETURNING {COLUMNAS}", (pedido_id,)
             ).fetchone()
             if envio is None:
@@ -139,10 +139,28 @@ class EnviosRepo:
                 "ORDER BY creado_en LIMIT %s FOR UPDATE SKIP LOCKED", (segundos, lote)
             ).fetchall()
             for envio in envios:
-                conn.execute("UPDATE envios SET estado = 'en_transito', despachado_en = now() WHERE id = %s",
-                             (envio["id"],))
+                conn.execute(
+                    "UPDATE envios SET estado = 'en_transito', despachado_en = COALESCE(despachado_en, now()) "
+                    "WHERE id = %s", (envio["id"],)
+                )
                 _encolar_notificacion(conn, envio)
         return len(envios)
+
+    def entregar_vencidos(self, segundos: int, lote: int = 50) -> int:
+        """Entrega guías vencidas según el reloj de la BD, sin tocar el outbox."""
+        with self._pool.connection() as conn:
+            return conn.execute(
+                """
+                WITH vencidos AS (
+                    SELECT id FROM envios
+                    WHERE estado = 'en_transito' AND despachado_en <= now() - make_interval(secs => %s)
+                    ORDER BY despachado_en LIMIT %s FOR UPDATE SKIP LOCKED
+                )
+                UPDATE envios SET estado = 'entregado'
+                FROM vencidos WHERE envios.id = vencidos.id
+                """,
+                (segundos, lote),
+            ).rowcount
 
 
 def _encolar_notificacion(conn, envio: dict) -> None:

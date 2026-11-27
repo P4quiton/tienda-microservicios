@@ -1,8 +1,7 @@
-"""Despacho simulado: pasa preparando -> en_transito cuando pasan N segundos desde la guía.
+"""Despacho y entrega simulados en el mismo barrido periódico.
 
-El tiempo se calcula en la BD desde `envios.creado_en`, así que sobrevive a reinicios y es el mismo para
-todas las réplicas (SKIP LOCKED en EnviosRepo.despachar_vencidos evita despachar dos veces). El aviso a
-Pedidos lo entrega el outbox (Notificador), que ya existe. No expone endpoints.
+La BD calcula los plazos desde la creación de la guía y desde el despacho, respectivamente.
+El outbox (Notificador) avisa a Pedidos solo del despacho.
 """
 import logging
 import threading
@@ -15,9 +14,13 @@ log = logging.getLogger("api-envios")
 
 
 class Despachador:
-    def __init__(self, pool: ConnectionPool, segundos: float, intervalo: float, listo: threading.Event | None = None):
+    def __init__(
+        self, pool: ConnectionPool, segundos: float, intervalo: float, listo: threading.Event | None = None,
+        *, entrega_segundos: int = 60,
+    ):
         self._repo = EnviosRepo(pool)
         self._segundos = segundos
+        self._entrega_segundos = entrega_segundos
         self._intervalo = intervalo
         self._listo = listo  # esquema migrado
         self._parar = threading.Event()
@@ -42,4 +45,10 @@ class Despachador:
                         log.info("Despachador: %d envío(s) pasaron a en_transito", n)
                 except Exception as exc:  # BD caída: se reintenta en el siguiente barrido
                     log.warning("Despachador: barrido fallido (%s)", type(exc).__name__)
+                try:
+                    n = self._repo.entregar_vencidos(self._entrega_segundos)
+                    if n:
+                        log.info("Despachador: %d envío(s) pasaron a entregado", n)
+                except Exception as exc:
+                    log.warning("Despachador: barrido de entrega fallido (%s)", type(exc).__name__)
             self._parar.wait(self._intervalo)

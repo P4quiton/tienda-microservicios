@@ -28,6 +28,7 @@ class Settings:
     rate_limit_checkout: int = 5  # no aplica a Envíos; se lee por homogeneidad con el resto de servicios
     rate_limit_interna: int = 300
     max_json_bytes: int = 262144
+    entrega_segundos: int = 60  # segundos desde el despacho
 
 
 def _required(name: str) -> str:
@@ -70,6 +71,7 @@ def load_settings() -> Settings:
         notificacion_intervalo=float(os.environ.get("NOTIFICACION_INTERVALO_SECONDS", "30")),
         despacho_segundos=_numero("ENVIOS_DESPACHO_SEGUNDOS", "60"),
         despacho_intervalo=_numero("ENVIOS_DESPACHO_INTERVALO_SEGUNDOS", "5"),
+        entrega_segundos=_numero("ENVIOS_ENTREGA_SEGUNDOS", "60", int),
         rate_limit_consulta=_numero("RATE_LIMIT_CONSULTA_POR_MIN", "120", int),
         rate_limit_mutacion=_numero("RATE_LIMIT_MUTACION_POR_MIN", "30", int),
         rate_limit_checkout=_numero("RATE_LIMIT_CHECKOUT_POR_MIN", "5", int),
