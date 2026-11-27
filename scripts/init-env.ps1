@@ -9,17 +9,31 @@ if (Test-Path $destination) {
     throw "El archivo .env ya existe. No se sobrescribira."
 }
 
-function New-SecurePassword {
+function New-SecureRandomBytes {
     $bytes = New-Object byte[] 32
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
 
     try {
         $rng.GetBytes($bytes)
-        return ([System.BitConverter]::ToString($bytes)).Replace("-", "").ToLowerInvariant()
+        return ,$bytes
     }
     finally {
         $rng.Dispose()
     }
+}
+
+function New-SecurePassword {
+    $bytes = New-SecureRandomBytes
+
+    return ([System.BitConverter]::ToString($bytes)).
+        Replace("-", "").
+        ToLowerInvariant()
+}
+
+function New-LaravelAppKey {
+    $bytes = New-SecureRandomBytes
+
+    return "base64:" + [Convert]::ToBase64String($bytes)
 }
 
 $content = [System.IO.File]::ReadAllText($template)
@@ -29,7 +43,18 @@ $content = [regex]::Replace(
     '(?m)^([A-Z0-9_]+)=REPLACE_ME\r?$',
     {
         param($match)
+
         return $match.Groups[1].Value + "=" + (New-SecurePassword)
+    }
+)
+
+$content = [regex]::Replace(
+    $content,
+    '(?m)^USUARIOS_APP_KEY=REPLACE_APP_KEY\r?$',
+    {
+        param($match)
+
+        return "USUARIOS_APP_KEY=" + (New-LaravelAppKey)
     }
 )
 

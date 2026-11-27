@@ -1,65 +1,52 @@
-# Tienda Microservicios
+## Configuración del microservicio de Usuarios
 
-Práctica académica de arquitectura Multi-Stack: ocho APIs REST, frontend Angular, Docker Compose y ampliación Kubernetes local.
+El servicio de Usuarios está implementado con PHP 8.5, Laravel 13, PostgreSQL 17 y autenticación JWT RS256.
 
-**Estado:** configuración inicial; todavía no hay aplicaciones implementadas ni despliegue de la tienda. Docker y Kubernetes se verificaron en el equipo del coordinador.
+### Configuración inicial en Windows
 
-| Módulo | Responsable | Puerto |
-|---|---|---:|
-| api-usuarios | Integrante 1 | 8001 |
-| api-productos | Integrante 2 | 8002 |
-| api-envios | Integrante 3 | 8003 |
-| api-inventario | Integrante 2 | 8004 |
-| api-carrito | Integrante 3 | 8005 |
-| api-pedidos | Integrante 3 | 8006 |
-| api-pagos | Integrante 3 | 8007 |
-| api-resenas | Integrante 2 | 8008 |
-| frontend-tienda | Integrante 4 | 4200 |
-
-Integrante 1: repositorio, infraestructura, Compose, Kubernetes y seguridad transversal. Cada responsable entrega código, pruebas, Dockerfile, .dockerignore y documentación.
-
-## Inicio
-```bash
-git clone https://github.com/P4quiton/tienda-microservicios.git
-cd tienda-microservicios
-```
-Leer los acuerdos antes de inicializar frameworks. Eliminar `.gitkeep` de la carpeta del servicio si el generador exige un directorio vacío. No borrar otros archivos.
-
-## Documentación
-- [Arquitectura](docs/arquitectura.md)
-- [Decisiones técnicas](docs/decisiones-tecnicas.md)
-- [Contratos de API](docs/contratos-api.md) y [OpenAPI por servicio](docs/api/)
-- [Seguridad](docs/seguridad.md)
-- [Flujo de compra](docs/flujo-compra.md)
-- [Contribución](docs/contribucion.md)
-
-## Ejecución futura
-`docker compose up --build` será el comando de ejecución una vez integrados los servicios y el archivo Compose. Kubernetes será un despliegue alternativo, no un requisito para desarrollar cada API. No ejecutar ambos entornos completos simultáneamente si faltan recursos.
-
-## Infraestructura de bases de datos
-
-El proyecto utiliza PostgreSQL 17 y MongoDB 8 mediante Docker Compose.
-
-La configuración incluye bases de datos independientes por microservicio, usuarios con permisos limitados, autenticación mediante contraseña y almacenamiento persistente.
-
-### Inicio rápido en Windows
+Desde la raíz del repositorio:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\init-env.ps1
-docker compose config --quiet
-docker compose up -d --wait --wait-timeout 180
-docker compose ps
+.\scripts\init-env.ps1
+.\scripts\init-jwt.ps1
 ```
 
-El generador de credenciales solamente debe ejecutarse si todavía no existe un archivo `.env`.
+El primer script genera las variables de entorno y credenciales independientes. El segundo genera las claves RSA de 3072 bits.
 
-### Puertos de desarrollo
+Los archivos existentes no se sobrescriben. Si ya existe `.env`, deben incorporarse manualmente las variables nuevas sin modificar las credenciales de las bases de datos existentes.
 
-| Servicio | Puerto externo | Puerto interno |
-|---|---|---|
-| PostgreSQL | 15432 | 5432 |
-| MongoDB | 27017 | 27017 |
+### Comunicación interna
 
-Los puertos externos pueden configurarse mediante las variables de entorno correspondientes.
+Los microservicios validarán los JWT emitidos por Usuarios utilizando la misma clave pública RSA.
 
-Para conocer los usuarios, bases de datos, configuraciones de conexión, medidas de seguridad y procedimientos de prueba, consultar [Documentación de infraestructura](docs/infraestructura.md).
+- Emisor: `api-usuarios`.
+- Audiencia: `tienda-microservicios`.
+- Algoritmo: RS256.
+- Duración: 3600 segundos.
+- Identificador: UUID v4 mediante el claim `sub`.
+- Roles: `cliente` y `admin`.
+
+La clave privada se proporciona exclusivamente a Usuarios. La clave pública se proporciona a los servicios que necesitan verificar tokens.
+
+### Ejecución mediante Docker Compose
+
+El servicio está declarado en el archivo `docker-compose.yml` principal.
+
+```bash
+docker compose build api-usuarios
+docker compose up -d api-usuarios
+docker compose exec api-usuarios php artisan migrate --force
+```
+
+Endpoints de infraestructura:
+
+- `http://localhost:8001/health`
+- `http://localhost:8001/ready`
+
+La construcción y ejecución contenerizada deberán validarse durante la integración general.
+
+### Documentación específica
+
+- `api-usuarios/README.md`: configuración, seguridad y pruebas.
+- `docs/api/usuarios.yaml`: contrato OpenAPI versión 1.1.0.
+- `api-usuarios/compose.test.yaml`: infraestructura PostgreSQL independiente para PHPUnit.
